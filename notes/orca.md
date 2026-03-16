@@ -1,4 +1,4 @@
-**Orca** is the paper that made iteration-level scheduling and selective batching hard to ignore in LLM serving. The implementation is very systems-heavy (13k+ lines of C++/CUDA code) but the core claim is simple: **how we schedule requests matters a lot**.
+**Orca** is the paper that made iteration-level scheduling and selective batching. The implementation is very systems-heavy (13k+ lines of C++/CUDA code) but the core claim/contribution is simple: **how we schedule requests matters a lot**.
 
 ## tldr;
 
