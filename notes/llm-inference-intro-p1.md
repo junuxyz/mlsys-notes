@@ -62,7 +62,7 @@ These two phases are crucial for understanding the GPU utilization problem and t
 
 ## the GPU utilization problem
 
-Modern GPUs such as the NVIDIA H100 are extremely capable. On paper, the H100 SXM offers about $3.35\,\text{TB/s}$ of HBM bandwidth and roughly $\sim 1000\,\text{TFLOP/s}$ dense BF16 peak. On paper that should make LLM inference very fast.
+Modern GPUs such as the NVIDIA H100 are extremely capable. On paper, the H100 SXM offers about $3.35 \text{TB/s}$ of HBM bandwidth and roughly $\sim 1000 \text{TFLOP/s}$ dense BF16 peak. On paper that should make LLM inference very fast.
 
 However, in practice, LLM inference often fails to use the GPU's full compute capacity. Even when running large models, the GPU spends much of its time waiting for data rather than doing arithmetic. This inefficient utilization raises the cost per generated token, which is exactly what we want to avoid.
 
@@ -99,7 +99,7 @@ Before the turning point where the line flattens, performance is limited by memo
   <sub>Figure 5. NVIDIA H100 SXM model-card numbers highlighting the gap between dense BF16 compute throughput and HBM bandwidth; the * refers to sparsity-assisted peak throughput.</sub>
 </p>
 
-NVIDIA lists the H100 SXM at about $\sim 1{,}000\,\text{TFLOP/s}$ of BF16 Tensor Core throughput (without sparsity) and $3.35\,\text{TB/s}$ of memory bandwidth. In other words, the chip can do arithmetic far faster than it can pull bytes from memory. That gap has widened over time. This is the basic idea behind the _memory wall_: you need higher arithmetic intensity to reach the compute roof.
+NVIDIA lists the H100 SXM at about $\sim 1{,}000 \text{TFLOP/s}$ of BF16 Tensor Core throughput (without sparsity) and $3.35 \text{TB/s}$ of memory bandwidth. In other words, the chip can do arithmetic far faster than it can pull bytes from memory. That gap has widened over time. This is the basic idea behind the _memory wall_: you need higher arithmetic intensity to reach the compute roof.
 
 <p align="center">
   <img src="../assets/notes/llm-inference-intro-p1/llm-inference-intro-p1-6.png" width="540" />
@@ -166,7 +166,7 @@ The dominant operations are large batched matrix-matrix multiplications, so pref
 
 On the memory side, the main terms are model-weight traffic, KV-cache writes, and temporary activations<sup><a href="#reference-12">[12]</a></sup>.
 
-A $32\text{B}$-parameter model in bf16<sup><a href="#reference-13">[13]</a></sup>, for example, stores about $32\text{B} \times 2\ \text{bytes} = 64\,\text{GB}$ of weights. So we need to stream the whole model's parameters from HBM to the compute units.
+A $32\text{B}$-parameter model in bf16<sup><a href="#reference-13">[13]</a></sup>, for example, stores about $32\text{B} \times 2\ \text{bytes} = 64 \text{GB}$ of weights. So we need to stream the whole model's parameters from HBM to the compute units.
 
 There is also activation memory, which is the temporary tensors created during the forward pass. These are mainly hidden states, Q/K/V projections, attention outputs, and MLP intermediate tensors. It is hard to calculate the exact usage of this from first principles because it depends on multiple configurations (batch size, sequence length, kernels, and the runtime). In practice, people often use broad heuristics (e.g. $10\text{--}30\%$ of model weight<sup><a href="#reference-14">[14]</a></sup>) for capacity planning. We will talk more about that in the memory capacity section.
 
@@ -198,9 +198,9 @@ Now let’s go through a concrete example with Qwen3-32B on a single H100 SXM.<s
 
 ## example: Qwen3-32B on H100 SXM
 
-To make the discussion concrete, consider serving a single request with Qwen3-32B on one NVIDIA H100 SXM. We assume `bf16` inference, $64$ transformer layers, hidden size $d = 5120$, MLP size $d_{ff} = 25600$, $64$ query heads, $8$ KV heads, head dimension $128$, and an H100 roofline of about $3.35\,\text{TB/s}$ HBM bandwidth and $\sim 1000\,\text{TFLOP/s}$ dense BF16 peak.
+To make the discussion concrete, consider serving a single request with Qwen3-32B on one NVIDIA H100 SXM. We assume `bf16` inference, $64$ transformer layers, hidden size $d = 5120$, MLP size $d_{ff} = 25600$, $64$ query heads, $8$ KV heads, head dimension $128$, and an H100 roofline of about $3.35 \text{TB/s}$ HBM bandwidth and $\sim 1000 \text{TFLOP/s}$ dense BF16 peak.
 
-For prefill, the important qualitative result is that the workload lands on the compute-favored side of the roofline. Using the same Qwen3-32B assumptions as above, a $1000$-token prompt comes out to about $63.46\,\text{TFLOPs}$ of core transformer work and an arithmetic intensity of about $1012.6\ \text{FLOPs/byte}$, which is comfortably above the H100 ridge point of roughly $298.5\ \text{FLOPs/byte}$. The exact number will shift with accounting choices, but the conclusion is robust: prefill has enough batched matrix work to look compute-favored rather than bandwidth-limited.
+For prefill, the important qualitative result is that the workload lands on the compute-favored side of the roofline. Using the same Qwen3-32B assumptions as above, a $1000$-token prompt comes out to about $63.46 \text{TFLOPs}$ of core transformer work and an arithmetic intensity of about $1012.6 \text{FLOPs/byte}$, which is comfortably above the H100 ridge point of roughly $298.5 \text{FLOPs/byte}$. The exact number will shift with accounting choices, but the conclusion is robust: prefill has enough batched matrix work to look compute-favored rather than bandwidth-limited.
 
 <p align="center">
   <img src="../assets/notes/llm-inference-intro-p1/llm-inference-intro-p1-9.png" width="540" />
@@ -254,7 +254,7 @@ TPS measures how many tokens the model can successfully process per second. RPS 
 
 Goodput measures the rate of requests or tokens that meet the target SLO, or service-level objective.
 
-For example, suppose a system serves $100$ requests per second, but only $70$ of them satisfy your TTFT and TPOT targets. The raw throughput is $100\,\text{RPS}$, but the goodput under that SLO is $70\,\text{RPS}$.
+For example, suppose a system serves $100$ requests per second, but only $70$ of them satisfy your TTFT and TPOT targets. The raw throughput is $100 \text{RPS}$, but the goodput under that SLO is $70 \text{RPS}$.
 
 Goodput differs from throughput because it includes latency-related constraints rather than just raw volume.
 
@@ -272,7 +272,7 @@ This distinction matters.
 > **Note**
 > In the roofline discussion above, weights were mostly a **traffic** question. Here they are a **capacity** question. The question is how many bytes must live in VRAM at all.
 
-A simple way to see that distinction is to visualize one decode request on an H100 SXM with $80\,\text{GB}$ of VRAM.
+A simple way to see that distinction is to visualize one decode request on an H100 SXM with $80 \text{GB}$ of VRAM.
 
 <p align="center">
   <img src="../assets/notes/llm-inference-intro-p1/llm-inference-intro-p1-11.png" width="540" />
@@ -288,7 +288,7 @@ During inference, model weights must stay resident in VRAM. Activations and KV c
   <sub>Figure 12. After loading the model, GPU memory is already mostly occupied by resident weights, with only a small activation footprint shown separately.</sub>
 </p>
 
-While we can use various dtypes for model weights, `bf16` is still a common baseline. At a rough back-of-the-envelope level, a $32\text{B}$-parameter model in `bf16` needs about $32\text{B} \times 2\ \text{bytes} = 64\,\text{GB}$ of raw weight storage. In this section, treat memory sizes as rough decimal GB estimates rather than binary GiB accounting.
+While we can use various dtypes for model weights, `bf16` is still a common baseline. At a rough back-of-the-envelope level, a $32\text{B}$-parameter model in `bf16` needs about $32\text{B} \times 2\ \text{bytes} = 64 \text{GB}$ of raw weight storage. In this section, treat memory sizes as rough decimal GB estimates rather than binary GiB accounting.
 
 <p align="center">
   <img src="../assets/notes/llm-inference-intro-p1/llm-inference-intro-p1-13.png" width="540" />
@@ -304,7 +304,7 @@ Activation memory is harder to estimate from first principles because it depends
   <sub>Figure 14. Activation memory is typically much smaller than model weights in decode, though it grows with larger prefills and larger batches.</sub>
 </p>
 
-After the model is loaded, most of the $80\,\text{GB}$ budget is already occupied. The remaining headroom goes to KV cache, activation and workspace buffers, and runtime overhead. In practice, usable headroom is smaller than the naive $80\,\text{GB} - 64\,\text{GB}$ because CUDA and the serving stack also consume memory.
+After the model is loaded, most of the $80 \text{GB}$ budget is already occupied. The remaining headroom goes to KV cache, activation and workspace buffers, and runtime overhead. In practice, usable headroom is smaller than the naive $80 \text{GB} - 64 \text{GB}$ because CUDA and the serving stack also consume memory.
 
 <p align="center">
   <img src="../assets/notes/llm-inference-intro-p1/llm-inference-intro-p1-15.png" width="540" />
@@ -640,7 +640,7 @@ F_{\text{model, prefill}}(1000)
 63{,}485{,}995{,}008{,}000
 $$
 
-So even after adding the smaller terms, prefill is still about $63.49\,\text{TFLOPs}$ for a $1000$-token prompt, which is only slightly above the dominant-terms-only estimate.
+So even after adding the smaller terms, prefill is still about $63.49 \text{TFLOPs}$ for a $1000$-token prompt, which is only slightly above the dominant-terms-only estimate.
 
 ### bytes moved during prefill
 
