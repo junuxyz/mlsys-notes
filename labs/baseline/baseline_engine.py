@@ -148,6 +148,51 @@ class RequestQueue:
         return bool(self._queue)
 
 
+class Endpoint:
+    """User-facing entrypoint that tokenizes prompts and admits requests to the queue."""
+
+    def __init__(
+        self,
+        tokenizer: AutoTokenizer,
+        request_queue: RequestQueue,
+        *,
+        default_sampling: SamplingConfig,
+        eos_token_id: int,
+    ):
+        self.tokenizer = tokenizer
+        self.request_queue = request_queue
+        self.default_sampling = default_sampling
+        self.eos_token_id = eos_token_id
+
+    def submit(
+        self,
+        request_id: str,
+        prompt_text: str,
+        sampling: SamplingConfig | None = None,
+    ) -> Request:
+        sampling = sampling or self.default_sampling
+        if sampling.eos_token_id is None:
+            sampling = SamplingConfig(
+                max_new_tokens=sampling.max_new_tokens,
+                eos_token_id=self.eos_token_id,
+            )
+
+        request = Request(
+            request_id=request_id,
+            prompt_text=prompt_text,
+            prompt_ids=tuple(
+                self.tokenizer.encode(
+                    prompt_text,
+                    add_special_tokens=False,
+                    verbose=False,
+                )
+            ),
+            sampling=sampling,
+        )
+        self.request_queue.push(request)
+        return request
+
+
 class StaticBatchScheduler:
     """Select the next fixed-size batch from the request queue."""
 
@@ -284,89 +329,18 @@ class TokenOutput:
     token_id: int
 
 
-class ServingSystem:
-    """Minimal static-batching serving system built around a queue and decode loop for comparison work."""
+class BaselineEngine:
+    """Data-plane executor for one statically selected baseline batch."""
 
     def __init__(
         self,
-        model_name: str,
-        max_batch_size: int = 4,
-        max_new_tokens: int = 64,
-        device: str | None = None,
-        dtype: torch.dtype | None = None,
+        runner: ModelRunner,
         clock: Callable[[], float] = time.perf_counter,
     ):
-        if max_batch_size < 1:
-            raise ValueError("max_batch_size must be >= 1")
-        if max_new_tokens < 1:
-            raise ValueError("max_new_tokens must be >= 1")
-
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.dtype = dtype or (
-            torch.bfloat16 if self.device == "cuda" else torch.float32
-        )
-        self.max_new_tokens = max_new_tokens
+        self.runner = runner
         self.clock = clock
 
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        if self.tokenizer.eos_token_id is None:
-            raise ValueError("Tokenizer must define eos_token_id")
-        if self.tokenizer.pad_token_id is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-
-        self.eos_token_id = int(self.tokenizer.eos_token_id)
-        self.runner = ModelRunner(
-            model_name=model_name,
-            pad_token_id=int(self.tokenizer.pad_token_id),
-            device=self.device,
-            dtype=self.dtype,
-        )
-        self.request_queue = RequestQueue(clock=clock)
-        self.scheduler = StaticBatchScheduler(
-            request_queue=self.request_queue,
-            max_batch_size=max_batch_size,
-        )
-
-    def submit(
-        self,
-        request_id: str,
-        prompt_text: str,
-        sampling: SamplingConfig | None = None,
-    ) -> Request:
-        """Tokenize one prompt, build a request, and enqueue it."""
-        sampling = sampling or SamplingConfig(
-            max_new_tokens=self.max_new_tokens,
-            eos_token_id=self.eos_token_id,
-        )
-        if sampling.eos_token_id is None:
-            sampling = SamplingConfig(
-                max_new_tokens=sampling.max_new_tokens,
-                eos_token_id=self.eos_token_id,
-            )
-
-        request = Request(
-            request_id=request_id,
-            prompt_text=prompt_text,
-            prompt_ids=tuple(
-                self.tokenizer.encode(
-                    prompt_text,
-                    add_special_tokens=False,
-                    verbose=False,
-                )
-            ),
-            sampling=sampling,
-        )
-        self.request_queue.push(request)
-        return request
-
-    def run(self) -> Iterator[TokenOutput]:
-        while self.request_queue:
-            batch_requests = self.scheduler.next_batch()
-            if not batch_requests:
-                break
-            yield from self._run_batch(batch_requests)
-
-    def _run_batch(self, requests: list[Request]) -> Iterator[TokenOutput]:
+    def run_batch(self, requests: list[Request]) -> Iterator[TokenOutput]:
         if not requests:
             return
 
@@ -404,8 +378,80 @@ class ServingSystem:
                 )
 
 
-class BaselineEngine(ServingSystem):
-    """Backward-compatible wrapper for the original baseline entrypoint name."""
+class ServingSystem:
+    """Minimal static-batching serving system that owns admission and orchestration."""
+
+    def __init__(
+        self,
+        model_name: str,
+        max_batch_size: int = 4,
+        max_new_tokens: int = 64,
+        device: str | None = None,
+        dtype: torch.dtype | None = None,
+        clock: Callable[[], float] = time.perf_counter,
+    ):
+        if max_batch_size < 1:
+            raise ValueError("max_batch_size must be >= 1")
+        if max_new_tokens < 1:
+            raise ValueError("max_new_tokens must be >= 1")
+
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.dtype = dtype or (
+            torch.bfloat16 if self.device == "cuda" else torch.float32
+        )
+        self.max_new_tokens = max_new_tokens
+        self.clock = clock
+
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        if self.tokenizer.eos_token_id is None:
+            raise ValueError("Tokenizer must define eos_token_id")
+        if self.tokenizer.pad_token_id is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
+        self.eos_token_id = int(self.tokenizer.eos_token_id)
+        self.request_queue = RequestQueue(clock=clock)
+        self.endpoint = Endpoint(
+            tokenizer=self.tokenizer,
+            request_queue=self.request_queue,
+            default_sampling=SamplingConfig(
+                max_new_tokens=self.max_new_tokens,
+                eos_token_id=self.eos_token_id,
+            ),
+            eos_token_id=self.eos_token_id,
+        )
+        self.engine = BaselineEngine(
+            runner=ModelRunner(
+                model_name=model_name,
+                pad_token_id=int(self.tokenizer.pad_token_id),
+                device=self.device,
+                dtype=self.dtype,
+            ),
+            clock=clock,
+        )
+        self.scheduler = StaticBatchScheduler(
+            request_queue=self.request_queue,
+            max_batch_size=max_batch_size,
+        )
+
+    def submit(
+        self,
+        request_id: str,
+        prompt_text: str,
+        sampling: SamplingConfig | None = None,
+    ) -> Request:
+        """Compatibility wrapper around the ingress endpoint."""
+        return self.endpoint.submit(
+            request_id=request_id,
+            prompt_text=prompt_text,
+            sampling=sampling,
+        )
+
+    def run(self) -> Iterator[TokenOutput]:
+        while self.request_queue:
+            batch_requests = self.scheduler.next_batch()
+            if not batch_requests:
+                break
+            yield from self.engine.run_batch(batch_requests)
 
 
 __all__ = [

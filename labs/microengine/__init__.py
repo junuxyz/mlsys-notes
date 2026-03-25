@@ -1,3 +1,3 @@
-from .microengine import MicroEngine, ServingSystem
+from .microengine import Endpoint, MicroEngine, ServingSystem
 
-__all__ = ["MicroEngine", "ServingSystem"]
+__all__ = ["Endpoint", "MicroEngine", "ServingSystem"]

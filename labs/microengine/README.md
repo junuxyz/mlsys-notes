@@ -7,11 +7,12 @@
 `microengine` is a minimal serving system built to keep the core serving components small, readable, and centered on
   the essential moving parts:
 
+- an endpoint
 - requests
 - a FIFO request queue
 - a static batch scheduler
+- an execution engine
 - a model runner
-- one decode loop
 
 
 ## What it includes
@@ -28,10 +29,10 @@
 The serving system is easiest to read as this loop:
 
 1. Submit requests into the queue.
-2. The scheduler picks the next static batch.
-3. Run prefill once for that batch.
-4. Repeatedly decode one token step at a time.
-5. Stop each request on EOS or `max_new_tokens`.
+2. The endpoint tokenizes them and admits them into the queue.
+3. The scheduler picks the next static batch.
+4. The engine runs prefill once for that batch.
+5. The engine repeatedly decodes one token step at a time.
 6. Move on to the next queued batch.
 
 That's it.
@@ -64,6 +65,11 @@ With that framing, `microengine` keeps the serving loop split into a few explici
   Owns admission order.
   It is just a FIFO queue of waiting requests.
 
+- `Endpoint`
+
+  Owns ingress.
+  It tokenizes raw prompt text, builds `Request` objects, and admits them into the queue.
+
 - `StaticBatchScheduler`
   
   Decides which requests enter the next batch.
@@ -79,14 +85,15 @@ With that framing, `microengine` keeps the serving loop split into a few explici
   1. `prefill()` runs the prompt pass for a newly admitted batch.
   2. `decode()` advances that batch by one token.
 
-- `ServingSystem`
-
-  Ties the whole loop together.
-  It loads the tokenizer and model, accepts requests through `submit()`, asks the scheduler for the next batch, runs prefill, and then keeps decoding until every request in that batch is done.
-
 - `MicroEngine`
 
-  Backward-compatible wrapper around `ServingSystem`.
+  Owns the data-plane execution for one selected batch.
+  It calls the model runner, updates each request, and drives the decode loop until the batch finishes.
+
+- `ServingSystem`
+
+  Wires the subsystems together.
+  It owns the endpoint, request queue, scheduler, and engine, and orchestrates the overall serving loop.
 
 ## Example
 

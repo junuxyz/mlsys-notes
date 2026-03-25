@@ -87,6 +87,46 @@ class RequestQueue:
         return bool(self._queue)
 
 
+class Endpoint:
+    """Ingress component that tokenizes prompts and admits requests to the queue."""
+
+    def __init__(
+        self,
+        tokenizer: AutoTokenizer,
+        request_queue: RequestQueue,
+        *,
+        default_max_new_tokens: int,
+        eos_token_id: int,
+    ):
+        self.tokenizer = tokenizer
+        self.request_queue = request_queue
+        self.default_max_new_tokens = default_max_new_tokens
+        self.eos_token_id = eos_token_id
+
+    def submit(
+        self,
+        request_id: str,
+        prompt_text: str,
+        max_new_tokens: int | None = None,
+        eos_token_id: int | None = None,
+    ) -> Request:
+        request = Request(
+            request_id=request_id,
+            prompt_text=prompt_text,
+            prompt_ids=tuple(
+                self.tokenizer.encode(
+                    prompt_text,
+                    add_special_tokens=False,
+                    verbose=False,
+                )
+            ),
+            max_new_tokens=max_new_tokens or self.default_max_new_tokens,
+            eos_token_id=self.eos_token_id if eos_token_id is None else eos_token_id,
+        )
+        self.request_queue.push(request)
+        return request
+
+
 class StaticBatchScheduler:
     """Select the next fixed-size batch from the request queue."""
 
@@ -214,82 +254,13 @@ class ModelRunner:
         return self._greedy_select(outputs.logits[:, -1, :])
 
 
-class ServingSystem:
-    """Minimal static-batching serving system built around a queue and decode loop."""
+class MicroEngine:
+    """Data-plane executor for one statically selected microengine batch."""
 
-    def __init__(
-        self,
-        model_name: str,
-        max_batch_size: int = 4,
-        max_new_tokens: int = 64,
-        device: str | None = None,
-        dtype: torch.dtype | None = None,
-    ):
-        if max_batch_size < 1:
-            raise ValueError("max_batch_size must be >= 1")
-        if max_new_tokens < 1:
-            raise ValueError("max_new_tokens must be >= 1")
+    def __init__(self, runner: ModelRunner):
+        self.runner = runner
 
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.dtype = dtype or (
-            torch.bfloat16 if self.device == "cuda" else torch.float32
-        )
-        self.max_new_tokens = max_new_tokens
-
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        if self.tokenizer.eos_token_id is None:
-            raise ValueError("Tokenizer must define eos_token_id")
-        if self.tokenizer.pad_token_id is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-
-        self.eos_token_id = int(self.tokenizer.eos_token_id)
-        self.runner = ModelRunner(
-            model_name=model_name,
-            pad_token_id=int(self.tokenizer.pad_token_id),
-            device=self.device,
-            dtype=self.dtype,
-        )
-        self.request_queue = RequestQueue()
-        self.scheduler = StaticBatchScheduler(
-            request_queue=self.request_queue,
-            max_batch_size=max_batch_size,
-        )
-
-    def submit(
-        self,
-        request_id: str,
-        prompt_text: str,
-        max_new_tokens: int | None = None,
-        eos_token_id: int | None = None,
-    ) -> Request:
-        """Tokenize one prompt, build a request, and enqueue it."""
-        request = Request(
-            request_id=request_id,
-            prompt_text=prompt_text,
-            prompt_ids=tuple(
-                self.tokenizer.encode(
-                    prompt_text,
-                    add_special_tokens=False,
-                    verbose=False,
-                )
-            ),
-            max_new_tokens=max_new_tokens or self.max_new_tokens,
-            eos_token_id=self.eos_token_id if eos_token_id is None else eos_token_id,
-        )
-        self.request_queue.push(request)
-        return request
-
-    def run(self) -> list[Request]:
-        completed: list[Request] = []
-        while self.request_queue:
-            batch = self.scheduler.next_batch()
-            if not batch:
-                break
-            self._run_batch(batch)
-            completed.extend(batch)
-        return completed
-
-    def _run_batch(self, requests: list[Request]) -> None:
+    def run_batch(self, requests: list[Request]) -> None:
         if not requests:
             return
 
@@ -319,5 +290,76 @@ class ServingSystem:
                 )
 
 
-class MicroEngine(ServingSystem):
-    """Backward-compatible wrapper for the original microengine entrypoint name."""
+class ServingSystem:
+    """Minimal static-batching serving system that owns admission and orchestration."""
+
+    def __init__(
+        self,
+        model_name: str,
+        max_batch_size: int = 4,
+        max_new_tokens: int = 64,
+        device: str | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        if max_batch_size < 1:
+            raise ValueError("max_batch_size must be >= 1")
+        if max_new_tokens < 1:
+            raise ValueError("max_new_tokens must be >= 1")
+
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.dtype = dtype or (
+            torch.bfloat16 if self.device == "cuda" else torch.float32
+        )
+        self.max_new_tokens = max_new_tokens
+
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        if self.tokenizer.eos_token_id is None:
+            raise ValueError("Tokenizer must define eos_token_id")
+        if self.tokenizer.pad_token_id is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
+        self.eos_token_id = int(self.tokenizer.eos_token_id)
+        self.request_queue = RequestQueue()
+        self.endpoint = Endpoint(
+            tokenizer=self.tokenizer,
+            request_queue=self.request_queue,
+            default_max_new_tokens=self.max_new_tokens,
+            eos_token_id=self.eos_token_id,
+        )
+        self.engine = MicroEngine(
+            runner=ModelRunner(
+                model_name=model_name,
+                pad_token_id=int(self.tokenizer.pad_token_id),
+                device=self.device,
+                dtype=self.dtype,
+            )
+        )
+        self.scheduler = StaticBatchScheduler(
+            request_queue=self.request_queue,
+            max_batch_size=max_batch_size,
+        )
+
+    def submit(
+        self,
+        request_id: str,
+        prompt_text: str,
+        max_new_tokens: int | None = None,
+        eos_token_id: int | None = None,
+    ) -> Request:
+        """Compatibility wrapper around the ingress endpoint."""
+        return self.endpoint.submit(
+            request_id=request_id,
+            prompt_text=prompt_text,
+            max_new_tokens=max_new_tokens,
+            eos_token_id=eos_token_id,
+        )
+
+    def run(self) -> list[Request]:
+        completed: list[Request] = []
+        while self.request_queue:
+            batch = self.scheduler.next_batch()
+            if not batch:
+                break
+            self.engine.run_batch(batch)
+            completed.extend(batch)
+        return completed

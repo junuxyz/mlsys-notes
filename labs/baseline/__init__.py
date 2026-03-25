@@ -1,6 +1,7 @@
 from .baseline_engine import (
     BaselineEngine,
     BatchState,
+    Endpoint,
     ModelRunner,
     Request,
     RequestMetrics,
@@ -16,6 +17,7 @@ __all__ = [
     "BaselineEngine",
     "ServingSystem",
     "BatchState",
+    "Endpoint",
     "ModelRunner",
     "Request",
     "RequestMetrics",
