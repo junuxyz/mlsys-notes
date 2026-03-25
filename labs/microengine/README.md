@@ -1,7 +1,7 @@
 ## microengine
 
 <p align="center">
-  <img src="../../assets/projects/microengine/microengine_1.png" alt="microengine diagram" width="520" />
+  <img src="../../assets/labs/microengine/microengine_1.png" alt="microengine diagram" width="480" />
 </p>
 
 `microengine` is a minimal inference engine built to keep the core serving components small, readable, and centered on
@@ -35,6 +35,11 @@ The engine is easiest to read as this loop:
 6. Move on to the next queued batch.
 
 That's it.
+
+
+> Note: This is intentionally a batch-to-completion, static-batching engine.
+Real serving systems usually add more machinery on top of this core loop, such as token streaming, scheduler re-entry,
+request-level metrics, and more flexible execution policies.
 
 
 ## Components and responsibilities
@@ -88,3 +93,8 @@ python labs/microengine/example.py
 ```
 
 The example constructs a `MicroEngine`, submits a few prompts, runs the engine, and prints each final decoded output.
+
+
+## Todo
+- [ ] implement memory allocation without using pytorch
+- [ ] TinyLlama -> Qwen

@@ -1,7 +1,7 @@
 # Baseline Engine
 
 <p align="center">
-  <img src="../../assets/labs/baseline/baseline_engine_demo.gif" alt="baseline engine demo" width="560" />
+  <img src="../../assets/labs/baseline/baseline_engine_demo.gif" alt="baseline engine demo" width="720" />
 </p>
 <p align="center"><em>baseline engine running with <code>max_batch_len = 2</code></em></p>
 
