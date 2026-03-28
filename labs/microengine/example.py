@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from microengine import ServingSystem
+from labs.microengine import ServingSystem
 
 
 def main() -> None:

@@ -1,2 +1,13 @@
-.venv
-__pycache__
+/.venv
+/.pytest_cache
+/.ruff_cache
+
+**/__pycache__/
+*.pyc
+*.egg-info/
+
+/labs/data/
+/labs/*/results/
+/assets/research/*/results/
+*.nsys-rep
+*.ncu-rep

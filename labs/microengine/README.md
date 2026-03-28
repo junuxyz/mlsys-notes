@@ -100,7 +100,7 @@ With that framing, `microengine` keeps the serving loop split into a few explici
 Run the demo directly:
 
 ```bash
-python labs/microengine/example.py
+uv run python -m labs.microengine.example
 ```
 
 The example constructs a `ServingSystem`, submits a few prompts, runs the system, and prints each final decoded output.

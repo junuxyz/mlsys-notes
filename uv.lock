@@ -369,7 +369,7 @@ wheels = [
 [[package]]
 name = "mlsys-notes"
 version = "0.0.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "accelerate" },
     { name = "pyyaml" },
