@@ -148,6 +148,27 @@ $$\text{Arithmetic Intensity} = \frac{\text{FLOPs}}{\text{Bytes Moved}}$$
 > **Note**
 > Crossing the ridge point does not mean the workload will automatically run near peak compute throughput. It means memory bandwidth is less likely to be the main bottleneck, so compute-side limits become more important.
 
+> **Note: Why total execution time is actually $T = \max(T_{\text{math}}, T_{\text{mem}})$**
+> 
+> It is natural to first think the total time should be
+> $$
+> T = T_{\text{mem}} + T_{\text{math}}
+> $$
+> because the data must be fetched before the GPU can compute on it.
+>
+> For a single operation, that sequential picture is not entirely wrong. But the roofline model is a **throughput model** for large steady-state workloads. On a modern GPU, memory movement and computation can overlap. While some warps are waiting on data, others can already be doing arithmetic on data that has arrived.<sup><a href="#reference-18">[18]</a></sup>
+>
+> That is why the total time can be modeled as
+> $$
+> T = \max(T_{\text{math}}, T_{\text{mem}})
+> $$
+> rather than their sum.
+>
+> - If $T_{\text{mem}} > T_{\text{math}}$, the compute units spend part of their time waiting for data, so the workload is memory-bound.
+> - If $T_{\text{math}} > T_{\text{mem}}$, data can be supplied faster than the compute units can process it, so the workload is compute-bound.
+>
+> In steady state, throughput is set by the slower stage.
+
 When arithmetic intensity is low, performance sits on the bandwidth-limited slope. Only after each byte is reused enough times does the bottleneck shift to the compute units, at which point performance flattens at the compute ceiling.
 
 > Since compute on modern hardware, including GPUs, is much faster than memory movement, **you will not reach peak performance unless your workload has high arithmetic intensity.**
@@ -1001,4 +1022,5 @@ This post was heavily inspired by [LLM Inference Economics From First Principles
   <li id="reference-15">Hugging Face, "Qwen/Qwen3-32B" - model page for the Qwen3-32B example used in this article. <a href="https://huggingface.co/Qwen/Qwen3-32B">Link</a></li>
   <li id="reference-16">IBM, "What is Grouped-Query Attention?" - a readable explainer for GQA. <a href="https://www.ibm.com/think/topics/grouped-query-attention">Link</a></li>
   <li id="reference-17">BentoML, "LLM Inference Metrics" - a good follow-up for a broader survey of serving metrics. <a href="https://bentoml.com/llm/inference-optimization/llm-inference-metrics">Link</a></li>
+  <li id="reference-18">Agrawal et al., "Taming Throughput-Latency Tradeoff in LLM Inference with Sarathi-Serve" - useful for the steady-state serving view where overlap and pipeline bubbles matter. <a href="https://www.usenix.org/conference/osdi24/presentation/agrawal">Link</a></li>
 </ol>
