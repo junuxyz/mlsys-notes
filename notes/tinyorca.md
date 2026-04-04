@@ -18,7 +18,6 @@ Iteration-level scheduling allows the engine to admit a new request as soon as a
   <sub>Figure 1. High-level architecture of `tinyorca`, showing the endpoint, request pool, scheduler, and engine.<sup><a href="#reference-2">[2]</a></sup></sub>
 </p>
 
-
 **[`OrcaServe`](https://github.com/junuxyz/tinyorca/blob/main/tinyorca/core/serve.py)** works as the orchestrator layer composed of four submodules:
 - **`Endpoint`**: tokenizes prompt text, builds a `Request`, and enqueues it into the `RequestPool`.
 - **`RequestPool`**: stores all active (non-finished) requests.
@@ -43,31 +42,33 @@ A request starts in `WAITING`, remains in the `RequestPool` until admitted, and 
 
 1. `Endpoint` tokenizes the input and pushes a new `Request` into the `RequestPool` (`WAITING`).
 2. The scheduler admits it via `select()`, transitioning it to `INITIATION`.
-3. On its first iteration, `run_iter()` sees empty `output_ids` and performs prefill on the full prompt, after which the request moves to `INCREMENT`.
+3. On its first iteration, `run_iter()` sees empty `output_ids` and performs prefill on the full prompt. After this, the request's state changes into `INCREMENT`.
 4. On subsequent iterations, `run_iter()` performs one decode step using only the last generated token.
-5. Once finished, the scheduler removes the request and frees its reserved resources.
+5. Once finished, the scheduler removes the request from RequestPool and frees its reserved resources.
 
-With these in mind, we now focus on the two main ideas from the paper. The first is iteration-level scheduling, which changes when the scheduler can reconsider the active set of requests.
+With these in mind, we now focus on the two main ideas from the paper.
 
-## Deep dive into Iterative Scheduling
+The first is iteration-level scheduling, which changes when the scheduler can reconsider the active set of requests.
 
-### Batching is the key to high throughput.
+## Deep dive into Iteration-level Scheduling
 
-Batching is one of the most important strategies for achieving high accelerator utilization on GPUs. When batching is enabled, inputs from multiple requests are coalesced into a single larger tensor before being fed into the model. GPUs favor large tensors over many small ones, and batching improves weight reuse by amortizing parameter reads across more computation.
+### Batching is the key to high throughput
+
+Batching is one of the most important strategies for achieving high accelerator utilization on GPUs. When batching is enabled, inputs from multiple requests are coalesced into a single larger tensor before being fed into the model. Batching is preferred because it improves weight reuse by amortizing parameter reads across more computation while increasing the compute linearly.
 
 If you want more background on why batching makes each token cheaper to generate, I covered that in [Introduction to LLM Inference Part 1](./llm-inference-intro-p1.md#why-batching-requests-makes-each-token-generation-cheaper).
 
 ### Early-finished and late-joining requests
 
-Older systems (e.g., FasterTransformer) did support batching, but in a naive way. The serving system and execution engine only interacted at two points:
+Older systems (e.g., FasterTransformer) did support batching but in a naive way. The serving system and execution engine only interacted at two points:
 1. when the serving system scheduled a new batch on an idle engine
 2. when the engine finished processing the current batch
 
-In other words, scheduling happened at the granularity of requests rather than iterations (steps). Here, _granularity_ just means the unit at which scheduling decisions are made.
+In other words, scheduling happened at the granularity of requests rather than iterations (steps). Here, _granularity_ just means the size of unit at which scheduling decisions are made.
 
 This is known as _static batching_: once a batch is formed, it remains fixed until all requests in the batch complete. Early-finished requests leave idle slots (see the empty slots in the figure below, or in tinyorca’s [demo](https://github.com/junuxyz/tinyorca/tree/main)), while queued requests cannot join until the longest-running request finishes.<sup><a href="#reference-3">[3]</a></sup>
 
-As a result, throughput drops and latency increases for both completed and waiting requests.
+As a result, throughput drops and latency increases for both completed requests for this batch and waiting requests for the next steps.
 
 <p align="center">
   <img
@@ -96,9 +97,9 @@ In the decode phase, the natural unit is one forward pass that produces one toke
   <sub>Figure 3. Iteration-level scheduling lets finished requests leave immediately and admits new work in the next iteration.<sup><a href="#reference-3">[3]</a></sup></sub>
 </p>
 
-This way, finished requests can leave immediately, and new requests can be admitted in the next iteration.
+This way, finished requests can leave immediately and new requests can be admitted in the next iteration, keeping the max batch size.
 
-### Scheduling Algorithm
+### Scheduling algorithm
 
 Let's look at the exact scheduling algorithm in detail:
 
@@ -121,7 +122,7 @@ At a high level, the algorithm does four things:
 
 The next section shows how `tinyorca` implements this.
 
-### How Iterative Scheduling is implemented in tinyorca
+### How Iteration-level Scheduling is implemented in tinyorca
 
 ```python
 class OrcaScheduler:
@@ -148,7 +149,9 @@ For each `WAITING` request that is newly admitted, the scheduler reserves:
 request.max_tokens
 ```
 
-Here, `request.max_tokens` is the request-level upper bound defined in code as `len(request.prompt_ids) + request.sampling.max_new_tokens`. While this reservation is quite conservative (which is later fixed by PagedAttention<sup><a href="#reference-6">[6]</a></sup>), it ensures that the scheduler reserves enough KV slots for the full prompt + the maximum possible decode length up front.
+`request.max_tokens` is the request-level upper bound defined in code as `len(request.prompt_ids) + request.sampling.max_new_tokens`.
+
+While this reservation is quite conservative (which is later fixed by PagedAttention<sup><a href="#reference-6">[6]</a></sup>), it ensures that the scheduler reserves enough KV slots for the full prompt + the maximum possible decode length up front.
 
 The selection policy in code is:
 
@@ -177,7 +180,7 @@ def select(self) -> list[Request]:
 4. promotes newly admitted requests from `WAITING` to `INITIATION`
 5. preserves FCFS admission order: if the next `WAITING` request would exceed `n_slots`, selection stops for that iteration
 
-One consequence of this policy is _head-of-line blocking_. `select()` scans requests in arrival order, and when the first newly admitted `WAITING` request does not fit in the remaining KV budget, it stops scanning for that iteration instead of skipping that request and checking later ones. That means a large older request can block smaller newer requests that would otherwise fit. This behavior is intentional here: it preserves FCFS fairness and keeps tinyorca aligned with Orca's scheduling policy.
+> Note: One consequence of this policy is _head-of-line blocking_. `select()` scans requests in arrival order. When the first newly admitted `WAITING` request does not fit in the remaining KV budget, it stops scanning for that iteration instead of skipping that request and checking later ones. That means a large older request can block smaller newer requests that would otherwise fit.
 
 **Upper bound**
 
@@ -208,7 +211,7 @@ In this loop, `run_iter(batch)` executes exactly one iteration of the model for 
 
 Because the loop yields one `RequestToken` per token event, streaming is naturally aligned with the iteration boundary.
 
-Now we can move to Orca’s second key idea: selective batching.
+Now we can move to Orca’s second key idea which is selective batching.
 
 ## Deep dive into Selective Batching
 
@@ -222,36 +225,40 @@ Now we can move to Orca’s second key idea: selective batching.
   <sub>Figure 5. Orca's selective batching idea: keep token-wise work batched, but split into per-request attention paths only where request-local context matters.<sup><a href="#reference-1">[1]</a></sup></sub>
 </p>
 
-### Why batching an arbitrary set of requests is hard
+### Why batching arbitrary set of requests is hard
 
-At a high level, iteration-level scheduling sounds simple: pick several requests, run one step, then repeat.  
+At a high level, iteration-level scheduling sounds simple:
+1. pick several requests
+2. run one step
+3. repeat this until all requests.
+
 The real difficulty is that requests selected in the same iteration usually do not have the same shape. Their prompt lengths may differ, their decode positions may differ, or some may be in prefill while others are already in decode.
 
-This was less problematic in request-level scheduling because requests grouped together were usually at the same stage of execution. For example, they might all be in prefill, or all be processing the same decode step.
+This was not a problem in request-level scheduling because requests grouped together were usually at the same stage of execution. For example, they might all be in prefill or all be processing the same decode step(position).
 
-The Orca paper highlights three failure modes for naive batching:
+The Orca paper highlights three failure modes for naive iteration-level batching:
 
 > case 1. all requests are in prefill but their prompt lengths differ.
 
-This is the easiest case but it is still inefficient. A dense batch usually assumes one common sequence length so shorter prompts must be padded to match the longest prompt in the batch.
+This is the easiest case to batch but it is still inefficient. A dense batch usually assumes one common sequence length so shorter prompts must be padded to match the longest prompt in the batch.
 
 > case 2. all requests are in decode but they are at different token positions.
 
-This case is harder. Even if each request contributes only one decode token in this iteration, each one attends over a different amount of prior context. In other words, their effective KV cache lengths differ.
+This case is harder to batch. Even if each request contributes only one decode token in this iteration, each one attends over a different amount of prior context. In other words, their effective KV cache lengths differ.
 
-A naive implementation could pad all requests to the longest cache length in the batch but this would waste both memory bandwidth and computation because shorter requests would still carry padded context they do not actually need.
+A naive implementation could pad all requests to the longest cache length in the batch but this would waste both memory bandwidth and computation because shorter requests would still carry padded context they don't need.
 
 > case 3. some requests are in prefill while others are already in decode.
 
-This is the hardest case. Prefill processes many tokens at once and looks more like large matrix-matrix computation. Decode processes one new token against an existing KV cache and is much more memory-bound, with matrix-vector-like behavior. Because prefill and decode have very different shapes and bottlenecks, padding alone does not batch them efficiently.
+This is the hardest case. Prefill processes many tokens at once and looks more like large matrix-matrix computation. Decode fetches exisitng KV cache and processes one new token against it with matrix-vector-like behavior. Because prefill and decode have very different shapes and bottlenecks, padding alone does not batch them efficiently.
 
 Orca’s answer to this problem is selective batching.
 
 ### How Selective Batching solves this
 
-Researchers observed that most operations in a Transformer layer are token-wise. In particular, LayerNorm, QKV projections, and MLP are applied independently to each token, so they can run on a flattened stream of tokens regardless of request boundaries.
+Authors observed that most operations in a Transformer layer are **token-wise**. In particular, LayerNorm, QKV projections, and MLP are applied independently to each token, so they can run on a flattened stream of tokens regardless of request boundaries.
 
-The boundary appears at attention. Once attention begins, the computation depends on each request's own KV cache, sequence length, and positions. In practice, the request-local partition includes RoPE application, KV-cache update, mask handling, and the attention kernel itself.
+The boundary appears at attention. Once attention begins, the computation depends on each request's own KV cache, sequence length, and positions. In practice, the request-local partition includes RoPE application, KV cache update, mask handling, and the attention kernel itself.
 
 To handle this, Orca introduces selective batching:
 - Run token-wise operations (LayerNorm, QKV projection, MLP) on a flattened batch: `[sum_i S_i, hidden]`
@@ -262,7 +269,9 @@ To handle this, Orca introduces selective batching:
 
 ### How selective batching is implemented in tinyorca
 
-If request selection and KV admission control belong to the scheduler (control plane), then executing one iteration step belongs to the engine and model (execution plane). In tinyorca, `OrcaEngine` builds the flat mixed batch for the iteration, and `Qwen3SelectiveModel` keeps token-wise work batched until attention, where execution becomes request-local.
+If request selection and KV admission control belong to the scheduler (control plane), then executing one iteration step belongs to the engine and model (execution plane).
+
+In tinyorca, `OrcaEngine` builds the flat mixed batch for the iteration, and `Qwen3SelectiveModel` keeps token-wise work batched until attention, where execution becomes request-local.
 
 ### OrcaEngine
 
@@ -299,7 +308,9 @@ def build_flat_batch(self, requests: list[Request]) -> FlatBatch:
         flat_start += step_len
 ```
 
-Engine first turns heterogeneous requests into one step token stream of shape `[sum_S]`, which is then embedded into `[sum_S, hidden]`. If `output_ids` is empty, it feeds the full `prompt_ids`; otherwise it feeds only the last generated token. Instead of building one padded `[B, longest_S]` tensor, it records just enough metadata to recover request-local attention inputs later: `RequestSpan`, `position_ids`, and `cache_position`. It also lazily creates one Hugging Face `DynamicCache` per request the first time that request is seen.
+Engine first turns heterogeneous requests into one step token stream of shape `[sum_S]`, which is then embedded into `[sum_S, hidden]`. If `output_ids` is empty, it feeds the full `prompt_ids`; otherwise it feeds only the last generated token.
+
+Instead of building one padded `[B, longest_S]` tensor, it records just enough metadata to recover request-local attention inputs later: `RequestSpan`, `position_ids`, and `cache_position`. It also creates one Hugging Face `DynamicCache` per request the first time that request is seen.
 
 The engine then feeds the flat batch into the Qwen3 model and selects one token per request:
 
@@ -411,17 +422,17 @@ So within each layer, tinyorca stays flat through the token-wise work, splits on
 
 `tinyorca` is a teaching implementation, not a faithful performance reproduction of the Orca paper. Here, selective batching is expressed in Python on top of Hugging Face Qwen3 internals.
 
-On the other hand, in the original paper, Orca was implemented as a distributed serving system with custom execution kernels, an attention KV manager, pipelined workers, and model parallelism across large GPT models.
+However, in the original paper, Orca was implemented as a distributed serving system with custom execution kernels written in CUDA, an attention KV manager, pipelined workers, and model parallelism across large GPT models.
 
-Despite the limitation, we can still observe the advantages of iterative scheduling in the benchmark section below.
+Despite the limitation, we can still observe the advantages of iteration level scheduling in the benchmark section below.
 
 ## Benchmark
 
-> **Caveat**: These numbers were collected on my laptop GPU (RTX 3050 Ti), which is convenient for iteration but not ideal for benchmarking. Treat them as illustrative prototype measurements rather than rigorous system-level results.
+> **Caveat**: These numbers were collected on my laptop GPU (RTX 3050 Ti), which is not ideal for benchmarking. Treat them as illustrative prototype measurements!
 
 This benchmark uses two synthetic workloads:
-1. `equal_size`: 16 requests of `(128, 128)`. This is the control case. Iterative scheduling does not help much here because requests in the batch start and finish at roughly the same time. The token lengths are also intentionally modest because I am working with less than 4 GB of VRAM.
-2. `short_long_mix`: 16 requests interleaving short `(32, 32)` and long `(512, 128)` requests. This is the positive case for Orca-style scheduling because short requests can finish early and new work can join on the next iteration.
+1. `equal_size`: 16 requests of `(128, 128)`. This is the control case. Iteration level scheduling does not help much here because requests in the batch start and finish at roughly the same time. The token lengths are also intentionally modest because I am working with less than 4 GB of VRAM.
+2. `short_long_mix`: 16 requests interleaving short `(32, 32)` and long `(512, 128)` requests (so 8 sets of `[(32, 32), (512, 128)]`) This is the positive case for Orca-style scheduling because short requests can finish early and new work can join on the next iteration immediately.
 
 In this setup, `bench.py` runs both workloads with `max_batch_size = 2`:
 
@@ -440,9 +451,8 @@ Below I summarize the key benchmark numbers instead of pasting the full terminal
     width="820"
   />
   <br />
-  <sub>Figure 6. Benchmark comparison on the `equal_size` workload, where request lengths are uniform and iterative scheduling brings little benefit.</sub>
+  <sub>Figure 6. Benchmark comparison on the `equal_size` workload, where request lengths are uniform and iteration level scheduling brings little benefit.</sub>
 </p>
-
 
 On the equal-size workload, tinyorca is slightly worse than the baseline on every core metric. Throughput is nearly identical, and the remaining difference likely reflects prototype overhead in the Python execution path rather than any scheduling effect. This overhead likely comes from the split/merge steps and the sequential handling of attention.
 
@@ -459,20 +469,21 @@ On the equal-size workload, tinyorca is slightly worse than the baseline on ever
   <sub>Figure 7. Benchmark comparison on the `short_long_mix` workload, where Orca-style iteration-level scheduling improves throughput and latency.</sub>
 </p>
 
-This is the workload where iterative scheduling provides clear benefits. Under static batching, shorter requests are effectively blocked by longer ones, delaying both completion and batch turnover.
+This workload is where iteration level scheduling provides clear benefits. Under static batching, shorter requests are effectively blocked by longer ones, delaying both completion and batch turnover.
 
 In contrast, Orca admits new requests as soon as slots free up, improving system utilization (see the [demo](https://github.com/junuxyz/tinyorca) section).
 
-As a result, throughput is `44.33%` higher, TTFT is `38.24%` lower, and end-to-end latency is `31.39%` lower than the baseline. TPOT is slightly worse, which is expected given the Python-level per-request attention path.
+As a result, throughput is ~44% higher, TTFT is ~38% lower, and end-to-end latency is ~31% lower than the baseline. TPOT is slightly worse, which is expected given the Python-level per-request attention path.
 
-Overall, the impact of scheduling depends on variance of requests in a batch. When requests are similar in length, scheduling has limited effect. However, under mixed workloads, iterative scheduling translates directly into higher throughput and lower latency.
+Overall, the impact of scheduling depends on variance of requests in a batch. When requests are similar in length, scheduling has limited (or slightly worse) effect. However under mixed workloads, iteration level scheduling translates directly into higher throughput and lower latency.
 
-## Conclusion
+## Conclusion  
 
-The key takeaway from Orca is a shift in perspective: efficient LLM serving is not just about faster kernels, but about controlling when work is scheduled.
+Using the mini implementation _tinyorca_, we explored Orca’s two core ideas and saw how smarter scheduling improves performance, especially with mixed-length requests.
 
-For the implementation described in this post, see the tinyorca codebase: https://github.com/junuxyz/tinyorca
+The main takeaway is that efficient LLM serving is not only about faster kernels but about deciding when and how to scehdule requests.
 
+For the full implementation, refer to the tinyorca codebase: https://github.com/junuxyz/tinyorca
 
 
 ## Appendix A. Qwen3 Architecture
