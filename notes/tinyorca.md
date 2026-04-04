@@ -1,4 +1,4 @@
-# Understanding Orca through tinyorca
+# Improving LLM Inference with Continuous Batching: Orca through tinyorca
 
 ## TL;DR
 

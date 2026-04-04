@@ -6,7 +6,7 @@ Currently focusing on LLM serving system and inference optimization.
 ## Notes
 - [Introduction to LLM Inference Part 1](notes/llm-inference-intro-p1.md)
 - [ORCA paper review](notes/orca.md)
-- [Understanding Orca through tinyorca](notes/tinyorca.md)
+- [Improving LLM Inference with Continuous Batching: Orca through tinyorca](notes/tinyorca.md)
 - [PagedAttention paper review](notes/pagedattention.md)
 
 ## Labs
