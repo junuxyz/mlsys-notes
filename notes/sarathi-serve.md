@@ -148,13 +148,13 @@ Hybrid batching works as follows:
 4. Re-flatten the outputs into a single token stream.
 5. Continue with token-wise operations and repeat for the next layer.
 
-Usually for the attention operation (step 3), prefill takes longer than the decode phase, so the attention operation for decode usually finishes earlier and waits for the prefill to get merged.<sup><a href="#reference-5">[5]</a></sup><sup><a href="#reference-6">[6]</a></sup>
+In a hybrid iteration, decode-side attention work may finish earlier than the larger prefill-side attention work, but decode requests still wait for the completion of the entire hybrid iteration before their next token can be returned.<sup><a href="#reference-5">[5]</a></sup><sup><a href="#reference-6">[6]</a></sup>
 
-Then why is hybrid batching latency in the image above even slightly overpasses standard prefill request, if prefill is the dominant path?
+Although prefill remains the dominant part of the hybrid iteration, the latency can slightly exceed that of a standalone prefill (as seen in the image above; 8ms vs 9ms) because the batch also includes decode-side work and incurs additional hybrid-batching overhead, such as batch formation and split/merge-related<sup><a href="#reference-7">[7]</a></sup> execution overhead.
 
-This is due to the overhead of splitting and merging the batch, which is also mentioned in Orca.<sup><a href="#reference-7">[7]</a></sup>
+So the step time for hybrid batching comes from $T_{\text{hybrid}} \approx T_{\text{batched non-attention}} + T_{\text{attention related operation for requests}} + T_{\text{overhead}}$.
 
-So the step time for hybrid batching comes from $T_{\text{hybrid}} \approx T_{\text{batched non-attention}} + T_{\text{prefill attention}} + T_{\text{overhead}}$.
+Note: The attention-related term is not directly observable as a single per-request quantity; it emerges from the combined execution of the hybrid batch.
 
 ### Takeaway 3
 
@@ -373,8 +373,7 @@ So R1 ~ (chunked) R6 are scheduled for this step and processed in hybrid batch.
   <sub>Figure 18. The final hybrid batch combines decode tokens with chunked prefill under one token budget.</sub>
 </p>
 
-For this iteration, the step latency can be approximated as $T_{\text{hybrid}} \approx T_{\text{batched non-attention}} + T_{\text{slowest attention}} + T_{\text{overhead}}$
-In this example, slowest attention would be the prefill attention of R6, since R6 is the longest prefill chunk in the batch.
+For this iteration, the step latency can be approximated as $T_{\text{hybrid}} \approx T_{\text{batched non-attention}} + T_{\text{attention related operation for requests}} + T_{\text{overhead}}$
 
 ## How Sarathi-Serve solves the problem
 
