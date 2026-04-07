@@ -102,17 +102,6 @@ vLLM v0 (Option 1 in the image above) is _prefill-prioritizing_ and eagerly admi
 
 In the image, A and B need to _wait_ for C_p and D_p to finish processing. This is called _generation stalls_, which I mentioned in the [tl;dr](#tldr).
 
-<p align="center">
-  <img
-    src="../assets/notes/sarathi-serve/sarathi-serve-04-vllm-generation-stalls.png"
-    alt="Generation stalls in vLLM caused by prefill prioritization"
-    width="480"
-  />
-  <br />
-  <sub>Figure 5. In vLLM, decode steps stall when newly arrived prefill requests are prioritized.<sup><a href="#reference-1">[1]</a></sup></sub>
-</p>
-
-
 FasterTransformer (Option 2) used static batching, which takes a request batch, runs prefill and decode steps on it until all the requests are finished processing, then executes the next request batch in the same manner.
 
 This can be called a _decode-prioritizing_ system, since it prioritizes decode steps instead of adding new prefills to increase throughput. This leads to low TPOT, but overall throughput is also low.
@@ -221,27 +210,7 @@ To do this, Sarathi-Serve introduces chunked prefill and stall-free batching wit
 
 Chunked prefill is a technique used in stall-free batching that allows "partial" prefill. Before this paper, prefill was processed atomically: either all or none.
 
-<p align="center">
-  <img
-    src="../assets/notes/sarathi-serve/sarathi-serve-08-chunked-prefill-before.png"
-    alt="Prefill processed atomically before chunked prefill"
-    width="340"
-  />
-  <br />
-  <sub>Figure 9. Before chunked prefill, a prefill request is handled atomically in one large step.</sub>
-</p>
-
 By using chunked prefill, we can process only part of it per step. This gives us flexibility in how much we process in one step. We will talk more about this in stall-free batching.
-
-<p align="center">
-  <img
-    src="../assets/notes/sarathi-serve/sarathi-serve-09-chunked-prefill-after.png"
-    alt="Chunked prefill split across multiple steps"
-    width="340"
-  />
-  <br />
-  <sub>Figure 10. Chunked prefill breaks a long prefill into smaller pieces that can be scheduled across steps.</sub>
-</p>
 
 ### Overhead
 
@@ -250,16 +219,6 @@ Chunked prefill introduces additional overhead compared to standard prefill. In 
 With chunked prefill, however, the prefill phase is split across multiple iterations. Each new chunk must attend to tokens from earlier chunks, which requires repeatedly reading the previously computed KV cache during attention.
 
 This results in extra memory reads due to KV cache re-access. 
-
-<p align="center">
-  <img
-    src="../assets/notes/sarathi-serve/sarathi-serve-10-chunked-prefill-overhead.png"
-    alt="Chunked prefill overhead across chunk sizes"
-    width="540"
-  />
-  <br />
-  <sub>Figure 11. The overhead of chunked prefill stays modest and falls as chunk size grows.<sup><a href="#reference-1">[1]</a></sup></sub>
-</p>
 
 In practice, this overhead remains modest because prefill is largely compute-bound, so the additional KV reads have limited impact on overall runtime. According to the ablation study section, the overhead is at most around 25% for small chunk sizes and becomes negligible for larger chunks.
 
@@ -319,8 +278,6 @@ With 4 requests R1~R4 in their decode phase, one chunked request (from an earlie
     alt="Initial state of the illustrated stall-free batching example"
     width="560"
   />
-  <br />
-  <sub>Figure 13. The initial state before scheduling begins under a token budget of 100.</sub>
 </p>
 
 `batch_num_tokens` is initialized to 0 for each step.
@@ -331,8 +288,6 @@ With 4 requests R1~R4 in their decode phase, one chunked request (from an earlie
     alt="First scheduling step admits decode requests"
     width="560"
   />
-  <br />
-  <sub>Figure 14. The scheduler first admits all decode requests in the current iteration.</sub>
 </p>
 
 First, we need to process all four decode requests, so we schedule them. `batch_num_tokens` becomes 4.
@@ -343,8 +298,6 @@ First, we need to process all four decode requests, so we schedule them. `batch_
     alt="Scheduler adds the leftover chunked prefill request"
     width="560"
   />
-  <br />
-  <sub>Figure 15. The remaining chunked prefill request is added next within the unused token budget.</sub>
 </p>
 
 Since `batch_num_tokens` (4) did not reach the token budget (100), we continue.
@@ -357,8 +310,6 @@ We prioritize the chunked request, which is R5 in this case. `min(remaining_budg
     alt="Scheduler chunks the next prefill request to fit the budget"
     width="560"
   />
-  <br />
-  <sub>Figure 16. The next prefill request is chunked so only the portion that fits the budget is scheduled.</sub>
 </p>
 
 The next request (in FCFS order) is R6, so we determine how much of it we can schedule. It turns out that `min(remaining_budget, R6) = 66`, so we chunk R6 and schedule only its first 66 tokens.
@@ -369,8 +320,6 @@ The next request (in FCFS order) is R6, so we determine how much of it we can sc
     alt="Leftover requests deferred to the next step"
     width="560"
   />
-  <br />
-  <sub>Figure 17. The unscheduled remainder is carried over to the next iteration.</sub>
 </p>
 
 The remainder stays pending for future iterations.
@@ -383,8 +332,6 @@ So R1 ~ (chunked) R6 are scheduled for this step and processed in hybrid batch.
     alt="Final hybrid batch chosen for the illustrated step"
     width="560"
   />
-  <br />
-  <sub>Figure 18. The final hybrid batch combines decode tokens with chunked prefill under one token budget.</sub>
 </p>
 
 For this iteration, the step latency can be approximated as $T_{\text{hybrid}} \approx T_{\text{batched non-attention}} + T_{\text{attention related operation for requests}} + T_{\text{overhead}}$
