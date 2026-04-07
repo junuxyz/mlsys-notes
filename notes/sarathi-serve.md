@@ -10,13 +10,13 @@
 
 ## Background
 
-For the background, I will mainly talk about four takeaways, following the paper's narrative.
+In the background section, I will mainly talk about four takeaways, following the paper's narrative.
 
 I will not talk about batching, since I've already explained it in my previous notes.<sup><a href="#reference-11">[11]</a></sup><sup><a href="#reference-12">[12]</a></sup>
 
-One thing to note is that batching works well especially on decode requests rather than prefill requests. This is because if the input tokens are big enough, just one prefill request can saturate the GPU and make it compute-bound. Since it's already compute-bound, there is no merit in adding batches.
+One thing to note is that batching works especially well for decode requests rather than prefill requests. This is because if the input is long enough, just one prefill request can saturate the GPU and make it compute-bound. Since it is already compute-bound, there is no merit in adding batches.
 
-On the other hand, decode is usually memory-bound so it linearly increases when batched together. Again I talked about this in Introduction to LLM Inference Part 1.<sup><a href="#reference-12">[12]</a></sup> so I will not repeat myself.
+On the other hand, decode is usually memory-bound, so throughput scales linearly when requests are batched together. Again, I talked about this in Introduction to LLM Inference Part 1.<sup><a href="#reference-12">[12]</a></sup>, so I will not repeat myself.
 
 The figure in the paper shows this:
 
@@ -24,7 +24,7 @@ The figure in the paper shows this:
   <img
     src="../assets/notes/sarathi-serve/sarathi-serve-01-prefill-vs-decode-batching.png"
     alt="Prefill and decode batching throughput comparison"
-    width="680"
+    width="600"
   />
   <br />
   <sub>Figure 1. Batching improves decode throughput much more than prefill throughput.<sup><a href="#reference-1">[1]</a></sup></sub>
@@ -38,43 +38,43 @@ So the first takeaway is:
 > The two phases of LLM inference, prefill and decode, demonstrate contrasting behaviors wherein batching boosts decode phase throughput immensely but has little effect on prefill throughput.
 
 
-Now let's talk about how to measure the total execution time in LLM inference. Not only LLM inference, but if it's a program that does something repetitively, it's either bound by time computing the data or time loading and saving the memory of the data.
+Now let's talk about how to measure total execution time in LLM inference. More generally, for any program that does something repetitively, execution is either bound by the time spent computing the data or by the time spent loading and storing it in memory.
 
-We can express in terms of T = max(T_math, T_mem)
+We can express this as $T = \max(T_{\text{math}}, T_{\text{mem}})$.
 
-How can we ignore the non-dominant time cost? We will look into this with a simple example borrowing Horace He's aesthetic image<sup><a href="#reference-2">[2]</a></sup>:
+How can we ignore the non-dominant time cost? We will look at this with a simple example, borrowing Horace He's aesthetic image<sup><a href="#reference-2">[2]</a></sup>:
 
 <p align="center">
   <img
     src="../assets/notes/sarathi-serve/sarathi-serve-01-memory-bound-single-workload.png"
     alt="Memory-bound execution for a single workload"
-    width="500"
+    width="420"
   />
   <br />
   <sub>Figure 2. A memory-bound workload where memory transfer dominates compute for a single request.<sup><a href="#reference-2">[2]</a></sup></sub>
 </p>
 
-Suppose a memory-bound scenario (which resembles a decode scenario), with low arithmetic intensity.<sup><a href="#reference-12">[12]</a></sup> Time computing the data only takes one second while retrieving and rewriting the data takes 8 seconds.
+Suppose we have a memory-bound scenario (which resembles a decode scenario) with low arithmetic intensity.<sup><a href="#reference-12">[12]</a></sup> Computing the data takes only one second, while retrieving and rewriting the data takes 8 seconds.
 
-If we are doing only one workload on such a program, the total time would take 1 + 8 = 9 seconds.
+If we run only one workload on such a program, the total time would be 1 + 8 = 9 seconds.
 
-However, suppose we have more than 1,000+ workloads repeating the same thing.
+However, suppose we have more than 1,000 workloads repeating the same thing.
 
 <p align="center">
   <img
     src="../assets/notes/sarathi-serve/sarathi-serve-02-memory-bound-batched-workloads.png"
     alt="Memory-bound execution with repeated batched workloads"
-    width="560"
+    width="480"
   />
   <br />
   <sub>Figure 3. Repeated memory-bound workloads hide compute time and remain dominated by memory access.<sup><a href="#reference-2">[2]</a></sup></sub>
 </p>
 
-When the first batch of data goes in, compute is done after a second, and then **it stays idle** for 7 seconds until the next batch of data comes in. So if multiple workloads are continuously executed, the 1s cost of compute gets hidden and the system is bound by the dominant time (in this case, T_mem) until T_math exceeds 8 seconds. 
+When the first batch of data goes in, compute is done after a second, and then it stays idle for 7 seconds until the next batch of data comes in. So if multiple workloads are continuously executed, the 1s cost of compute gets hidden and the system is bound by the dominant time (in this case, $T_{\text{mem}}$) until $T_{\text{math}}$ exceeds 8 seconds. 
 
-This is why T can be expressed as max(T_mem, T_math).
+This is why $T$ can be expressed as $\max(T_{\text{mem}}, T_{\text{math}})$.
 
-This also means that theoretically, there is no additional cost of the lower cost to increase until it reaches the dominant cost.
+This also means that, theoretically, increasing the smaller cost adds no extra end-to-end latency until it reaches the dominant cost.
 
 ### Takeaway 2
 
@@ -86,27 +86,27 @@ This also means that theoretically, there is no additional cost of the lower cos
 
 
 
-Now we will review on the earlier inference engines which are FasterTransformer, Orca, and vLLM (v0). We will first compare FasterTransformer and vLLM v0 and then talk about Orca.
+Now we will review earlier inference engines: FasterTransformer, Orca, and vLLM (v0). We will first compare FasterTransformer and vLLM v0, and then talk about Orca.
 
 <p align="center">
   <img
     src="../assets/notes/sarathi-serve/sarathi-serve-03-vllm-vs-fastertransformer.png"
     alt="vLLM v0 and FasterTransformer scheduling comparison"
-    width="700"
+    width="620"
   />
   <br />
   <sub>Figure 4. vLLM v0 and FasterTransformer compared as prefill-prioritizing and decode-prioritizing schedulers.<sup><a href="#reference-3">[3]</a></sup></sub>
 </p>
 
-vLLM v0 (Option 1 in the image above) is _prefill-prioritizing_ and eagerly admits prefills before resuming ongoing decodes. As seen in the image, even if a new request comes in, it prioritizes the new request's prefill over the earlier requests' decode steps. This leads to high throughput because we can batch more decode steps after every request is in decode phase, but leads to higher TPOT.
+vLLM v0 (Option 1 in the image above) is _prefill-prioritizing_ and eagerly admits prefills before resuming ongoing decodes. As seen in the image, even if a new request comes in, it prioritizes the new request's prefill over the earlier requests' decode steps. This leads to high throughput because we can batch more decode steps after every request is in the decode phase, but it also leads to higher TPOT.
 
-In the image, A and B need to _wait_ for C_p and D_p to finish processing. This is called _generation stalls_ which I mentioned above the [tl;dr](#tldr).
+In the image, A and B need to _wait_ for C_p and D_p to finish processing. This is called _generation stalls_, which I mentioned in the [tl;dr](#tldr).
 
 <p align="center">
   <img
     src="../assets/notes/sarathi-serve/sarathi-serve-04-vllm-generation-stalls.png"
     alt="Generation stalls in vLLM caused by prefill prioritization"
-    width="560"
+    width="480"
   />
   <br />
   <sub>Figure 5. In vLLM, decode steps stall when newly arrived prefill requests are prioritized.<sup><a href="#reference-1">[1]</a></sup></sub>
@@ -115,19 +115,19 @@ In the image, A and B need to _wait_ for C_p and D_p to finish processing. This 
 
 FasterTransformer (Option 2) used static batching, which takes a request batch, runs prefill and decode steps on it until all the requests are finished processing, then executes the next request batch in the same manner.
 
-This can be called _decode-prioritizing_ system, since it prioritizes decode steps instead of adding new prefills to increase throughput. This leads to so low TPOT but overall throughput is low.
+This can be called a _decode-prioritizing_ system, since it prioritizes decode steps instead of adding new prefills to increase throughput. This leads to low TPOT, but overall throughput is also low.
 
-Orca **was** the only engine back then that supported mixed(hybrid) batching at that time (early 2024).
+Orca was the only engine back then that supported mixed (hybrid) batching (in early 2024).
 
-Orca introduced selective batching which batches all non-attention operations and only runs attention per request (since attention should be applied per request). For an in-depth explanation, check out Improving LLM Inference with Continuous Batching: Orca through tinyorca.<sup><a href="#reference-11">[11]</a></sup>
+Orca introduced selective batching, which batches all non-attention operations and runs attention per request only (since attention should be applied per request). For an in-depth explanation, check out Improving LLM Inference with Continuous Batching: Orca through tinyorca.<sup><a href="#reference-11">[11]</a></sup>
 
-However, Orca's Hybrid batching didn't turn out to be **optimal** because it increased latency which often exceeded SLO.
+However, Orca's hybrid batching did not turn out to be optimal because it increased latency, which often exceeded the SLO.
 
 ### What is SLO?
 
-SLO stands for Service Level Objective which refers to a target performance level for a particular metric. This sets a standard for what’s considered acceptable service that doesn't harm user experience.<sup><a href="#reference-4">[4]</a></sup>
+SLO stands for Service Level Objective, which refers to a target performance level for a particular metric. This sets a standard for what is considered acceptable service that does not harm user experience.<sup><a href="#reference-4">[4]</a></sup>
 
-Usually in the context of LLM inference, this boils down to metrics such as TPOT, TTFT etc. Throughout this post, let's assume TPOT must be <10ms.
+Usually, in the context of LLM inference, this boils down to metrics such as TPOT and TTFT. Throughout this post, let's assume TPOT must be <10ms.
 
 
 
@@ -135,13 +135,13 @@ Usually in the context of LLM inference, this boils down to metrics such as TPOT
   <img
     src="../assets/notes/sarathi-serve/sarathi-serve-05-vllm-orca-latency-slo.png"
     alt="Decode latency exceeding the SLO in vLLM and Orca"
-    width="420"
+    width="360"
   />
   <br />
   <sub>Figure 6. Both vLLM and Orca exceed the decode latency SLO under mixed batching.<sup><a href="#reference-3">[3]</a></sup></sub>
 </p>
 
-Above is an image of both vLLM and Orca which both do not satisfy the latency SLO (10ms). We already saw why this happens in vLLM (it prioritizes prefill request first). But you can see that Orca's hybrid batching increases latency in a fairly subtle manner.
+Above is an image showing that both vLLM and Orca do not satisfy the latency SLO (10ms). We already saw why this happens in vLLM (it prioritizes prefill requests first). But you can see that Orca's hybrid batching increases latency in a fairly subtle manner.
 
 ### The effect of mixed batching
 
@@ -165,14 +165,14 @@ Note: The attention-related term is not directly observable as a single per-requ
 
 > The third takeaway the authors mentioned is that the interleaving of prefills and decodes involves a trade-off between throughput and latency for current LLM inference schedulers.
 >
-> State-of-the-art systems (like vLLM v0) use prefill-prioritizing schedules which enhanced throughput but also had side effect notably generation stalls.
+> State-of-the-art systems (like vLLM v0) use prefill-prioritizing schedules, which improve throughput but also have side effects, most notably generation stalls.
 >
 > Another takeaway I want to explicitly mention (while already explained implicitly) is that not all step sizes are the same. Decode steps finish much more quickly, prefill steps take longer, and a hybrid batch of them takes even longer than that due to overhead.
 
 
 ### Pipeline Parallelism
 
-Pipeline parallelism(PP) is a method where we shard the model weight vertically, which divides it into groups of layers. For example, if we use four GPUs for PP with a model that has 80 layers, each model will take 20 layers (e.g., device 0 gets layer 0-19, device 1 gets layer 20-39, ...) Unlike training, we don't need a backward pass for inference, so it's an even better fit for inference than training.
+Pipeline parallelism (PP) is a method where we shard the model weights vertically, dividing them into groups of layers. For example, if we use four GPUs for PP with a model that has 80 layers, each device will take 20 layers (e.g., device 0 gets layers 0-19, device 1 gets layers 20-39, ...). Unlike training, we do not need a backward pass for inference, so it is an even better fit for inference than for training.
 
 So if we apply this to a forward pass scenario, GPU 0 processes the first 20 layers and sends data to GPU 1 and GPU 1 processes the next 20 layers, and so on.
 
@@ -180,7 +180,7 @@ So if we apply this to a forward pass scenario, GPU 0 processes the first 20 lay
   <img
     src="../assets/notes/sarathi-serve/sarathi-serve-06-pipeline-parallelism-overview.png"
     alt="Pipeline parallelism overview across multiple GPUs"
-    width="680"
+    width="600"
   />
   <br />
   <sub>Figure 7. Pipeline parallelism splits layers across devices so one micro-batch flows stage by stage.<sup><a href="#reference-8">[8]</a></sup></sub>
@@ -194,50 +194,50 @@ For more in-depth explanation on PP, I recommend these two articles.<sup><a href
   <img
     src="../assets/notes/sarathi-serve/sarathi-serve-07-pipeline-bubble.png"
     alt="Pipeline bubble caused by uneven step times"
-    width="620"
+    width="540"
   />
   <br />
   <sub>Figure 8. Uneven iteration times create pipeline bubbles where some devices wait idly.<sup><a href="#reference-1">[1]</a></sup></sub>
 </p>
 
-Another problem found when using multiple GPUs in Orca is that pipeline bubbles happen.
+Another problem that appears when using multiple GPUs in Orca is pipeline bubbles.
 
-In [Takeaway 3](#takeaway-3) I have already mentioned that step size is not the same. Since the size of each step has high variance, performance is bound to the longest processing time for GPU at the moment.
+In [Takeaway 3](#takeaway-3), I already mentioned that step sizes are not the same. Since the size of each step has high variance, performance is bound by the longest processing time among the GPUs at that moment.
 
-For example in the image above, GPU0 processes C and D's prefill and is done while GPU1 is processing A and B's (whose inputs are longer) prefill, which needs more time to process. GPU0 needs to wait until GPU1 is finished and then can pass it. This gets even worse when GPU1 is processing prefill while GPU0 is finished processing decode (which ends earlier).
+For example, in the image above, GPU0 finishes processing the prefills for C and D while GPU1 is still processing the prefills for A and B, whose inputs are longer and therefore take more time. GPU0 has to wait until GPU1 is finished before it can pass data along. This gets even worse when GPU1 is processing prefill while GPU0 has already finished processing decode, which ends earlier.
 
 ### Takeaway 4
 
-> Again, step sizes are NOT the same. This can lead to large variance in compute time of LLM iterations, depending on composition of prefill- and decode-tokens in the batch. This introduces  significant bubbles when using pipeline-parallelism.
+> Again, step sizes are NOT the same. This can lead to large variance in the compute time of LLM iterations, depending on the composition of prefill and decode tokens in the batch. This introduces significant bubbles when using pipeline parallelism.
 
 
 ## Sarathi-Serve
 
-If we add up all the insights from the four takeaways (especially takeaway 2), we can think of making hybrid batching "smarter", by carefully adding prefill computation. This will only introduce none or marginal cost while increasing throughput.
+If we add up all the insights from the four takeaways (especially Takeaway 2), we can think of making hybrid batching "smarter" by carefully adding prefill computation. This will introduce little to no additional cost while increasing throughput.
 
-In order to do this, Sarathi-Serve introduces chunked prefill and Stall free batching with token budget.
+To do this, Sarathi-Serve introduces chunked prefill and stall-free batching with a token budget.
 
 ### Chunked Prefill
 
-Chunked prefill is a technique used in stall-free batching which is a concept to allow "partial" prefill. Before this paper was introduced, prefill was processed atomically; either all or none.
+Chunked prefill is a technique used in stall-free batching that allows "partial" prefill. Before this paper, prefill was processed atomically: either all or none.
 
 <p align="center">
   <img
     src="../assets/notes/sarathi-serve/sarathi-serve-08-chunked-prefill-before.png"
     alt="Prefill processed atomically before chunked prefill"
-    width="400"
+    width="340"
   />
   <br />
   <sub>Figure 9. Before chunked prefill, a prefill request is handled atomically in one large step.</sub>
 </p>
 
-By using chunked prefill, it allows us to process part of it per step. This allows flexibility in how much we are going to process in one step. We will talk more about this in Stall free batching.
+By using chunked prefill, we can process only part of it per step. This gives us flexibility in how much we process in one step. We will talk more about this in stall-free batching.
 
 <p align="center">
   <img
     src="../assets/notes/sarathi-serve/sarathi-serve-09-chunked-prefill-after.png"
     alt="Chunked prefill split across multiple steps"
-    width="400"
+    width="340"
   />
   <br />
   <sub>Figure 10. Chunked prefill breaks a long prefill into smaller pieces that can be scheduled across steps.</sub>
@@ -255,13 +255,13 @@ This results in extra memory reads due to KV cache re-access.
   <img
     src="../assets/notes/sarathi-serve/sarathi-serve-10-chunked-prefill-overhead.png"
     alt="Chunked prefill overhead across chunk sizes"
-    width="620"
+    width="540"
   />
   <br />
   <sub>Figure 11. The overhead of chunked prefill stays modest and falls as chunk size grows.<sup><a href="#reference-1">[1]</a></sup></sub>
 </p>
 
-In practice, this overhead remains modest because prefill is largely compute-bound so the additional KV reads have limited impact on overall runtime. According to the ablation study section, the overhead is at most around ~25% for small chunk sizes and becomes negligible for larger chunks.
+In practice, this overhead remains modest because prefill is largely compute-bound, so the additional KV reads have limited impact on overall runtime. According to the ablation study section, the overhead is at most around 25% for small chunk sizes and becomes negligible for larger chunks.
 
 
 ### Stall Free Batching
@@ -272,7 +272,7 @@ This is the scheduling algorithm introduced in Sarathi-Serve:
   <img
     src="../assets/notes/sarathi-serve/sarathi-serve-11-stall-free-batching-algorithm.png"
     alt="Sarathi-Serve stall-free batching algorithm"
-    width="360"
+    width="320"
   />
   <br />
   <sub>Figure 12. Sarathi-Serve's stall-free batching algorithm uses a fixed token budget for each step.<sup><a href="#reference-1">[1]</a></sup></sub>
@@ -282,11 +282,11 @@ If we break down the algorithm, stall-free batching works as follows:
 
 1. **Initialize a token budget.**
 
-   _Token budget_ is the fundamental knob used in Sarathi-Serve which determines how many tokens to allow for the step. This is static throughout the serving. We will talk more about considerations and tradeoffs due to the amount of token budget we set.
+   _Token budget_ is the fundamental knob used in Sarathi-Serve, which determines how many tokens to allow in a step. This is static throughout serving. We will talk more about the considerations and tradeoffs involved in setting the token budget.
 
 2. **Also initialize batch number of tokens.**
 
-   This is used to check whether the current batch exceeded the token budget.
+   This is used to check whether the current batch has exceeded the token budget.
 
 3. **For each step:**
 
@@ -305,7 +305,7 @@ If we break down the algorithm, stall-free batching works as follows:
 
 4. **Process hybrid batching of all the requests selected in step 3.**
 
-To consolidate the understanding, I will walk through an illustrated example that hopefully makes the scheduling process more intuitive. 
+To make this more concrete, I will walk through an illustrated example that hopefully makes the scheduling process more intuitive.
 
 ### Stall Free Batching w/ Illustrated Example
 
@@ -317,57 +317,57 @@ With 4 requests R1~R4 in their decode phase, one chunked request (from an earlie
   <img
     src="../assets/notes/sarathi-serve/sarathi-serve-13-illustrated-example-initial-state.png"
     alt="Initial state of the illustrated stall-free batching example"
-    width="660"
+    width="560"
   />
   <br />
   <sub>Figure 13. The initial state before scheduling begins under a token budget of 100.</sub>
 </p>
 
-Batch_num_tokens is initialized to 0 for each step.
+`batch_num_tokens` is initialized to 0 for each step.
 
 <p align="center">
   <img
     src="../assets/notes/sarathi-serve/sarathi-serve-14-illustrated-example-schedule-decodes.png"
     alt="First scheduling step admits decode requests"
-    width="700"
+    width="560"
   />
   <br />
   <sub>Figure 14. The scheduler first admits all decode requests in the current iteration.</sub>
 </p>
 
-First, we need to process all four decode requests so we schedule them. batch_num_tokens becomes 4.
+First, we need to process all four decode requests, so we schedule them. `batch_num_tokens` becomes 4.
 
 <p align="center">
   <img
     src="../assets/notes/sarathi-serve/sarathi-serve-15-illustrated-example-schedule-r5.png"
     alt="Scheduler adds the leftover chunked prefill request"
-    width="660"
+    width="560"
   />
   <br />
   <sub>Figure 15. The remaining chunked prefill request is added next within the unused token budget.</sub>
 </p>
 
-Since batch_num_tokens(4) didn't reach the token budget(100), we continue. 
+Since `batch_num_tokens` (4) did not reach the token budget (100), we continue.
 
-We prioritize the chunked request, which is R5 in this case. min(remaining_budget, R5) = 30 so we schedule it to process the whole leftover prefill request. batch_num_tokens is updated to 34.
+We prioritize the chunked request, which is R5 in this case. `min(remaining_budget, R5) = 30`, so we schedule it to process the whole leftover prefill request. `batch_num_tokens` is updated to 34.
 
 <p align="center">
   <img
     src="../assets/notes/sarathi-serve/sarathi-serve-16-illustrated-example-chunk-r6.png"
     alt="Scheduler chunks the next prefill request to fit the budget"
-    width="660"
+    width="560"
   />
   <br />
   <sub>Figure 16. The next prefill request is chunked so only the portion that fits the budget is scheduled.</sub>
 </p>
 
-The next request (in FCFS order) is R6 so we also determine how much we can schedule. It turns out min(remaining_budget, R6) = 66 so we chunk R6 and only schedule the first 66 tokens of it.
+The next request (in FCFS order) is R6, so we determine how much of it we can schedule. It turns out that `min(remaining_budget, R6) = 66`, so we chunk R6 and schedule only its first 66 tokens.
 
 <p align="center">
   <img
     src="../assets/notes/sarathi-serve/sarathi-serve-17-illustrated-example-leftovers.png"
     alt="Leftover requests deferred to the next step"
-    width="660"
+    width="560"
   />
   <br />
   <sub>Figure 17. The unscheduled remainder is carried over to the next iteration.</sub>
@@ -381,7 +381,7 @@ So R1 ~ (chunked) R6 are scheduled for this step and processed in hybrid batch.
   <img
     src="../assets/notes/sarathi-serve/sarathi-serve-18-illustrated-example-final-batch.png"
     alt="Final hybrid batch chosen for the illustrated step"
-    width="660"
+    width="560"
   />
   <br />
   <sub>Figure 18. The final hybrid batch combines decode tokens with chunked prefill under one token budget.</sub>
@@ -391,27 +391,27 @@ For this iteration, the step latency can be approximated as $T_{\text{hybrid}} \
 
 ## How Sarathi-Serve solves the problem
 
-Stall free batching is indeed using the hybrid batching technique introduced from Orca, but what differs is that instead of using the number of requests as an upper bound, it uses token budget.
+Stall-free batching does use the hybrid batching technique introduced by Orca, but the difference is that instead of using the number of requests as an upper bound, it uses a token budget.
 
-Before Sarathi-Serve, batched tokens per step had high variance because for some steps, long prefills are batched together and for other steps most of them are decodes. Also, input lengths in requests differ, so some batched prefill takes a very long time.
+Before Sarathi-Serve, batched tokens per step had high variance because some steps batch together long prefills, while other steps consist mostly of decodes. Also, request input lengths differ, so some batched prefills take a very long time.
 
 <p align="center">
   <img
     src="../assets/notes/sarathi-serve/sarathi-serve-19-token-budget-high-variance.png"
     alt="High per-step token variance before token-budgeted scheduling"
-    width="550"
+    width="480"
   />
   <br />
   <sub>Figure 19. Without a token budget, per-step work varies widely depending on the batch mix.<sup><a href="#reference-3">[3]</a></sup></sub>
 </p>
 
-By capping token budget, we can control and estimate worst-case step latency much better, since it is bounded by a batch whose total tokens ≈ token budget. Token budget is usually capped to match the SLO requirement (e.g., < 10ms) so we can batch more prefill tokens while adding minimal latency to decode steps batched together.
+By capping the token budget, we can control and estimate worst-case step latency much better, since it is bounded by a batch whose total tokens are approximately equal to the token budget. The token budget is usually capped to match the SLO requirement (e.g., < 10ms), so we can batch more prefill tokens while adding minimal latency to the decode steps batched with them.
 
 <p align="center">
   <img
     src="../assets/notes/sarathi-serve/sarathi-serve-20-token-budget-bounded-latency.png"
     alt="Bounded step latency with token-budgeted scheduling"
-    width="680"
+    width="600"
   />
   <br />
   <sub>Figure 20. A token budget bounds step latency and reduces variance across iterations.<sup><a href="#reference-1">[1]</a></sup></sub>
@@ -419,13 +419,13 @@ By capping token budget, we can control and estimate worst-case step latency muc
 
 Also, since each step is capped to the token budget, variance becomes much lower, minimizing the pipeline bubbles.
 
-### Considerations(Tradeoffs) on determining token budget
+### Considerations (Tradeoffs) for determining token budget
 
-Choosing the token budget is a tradeoff between latency, efficiency, and hardware behavior.
+Choosing the token budget is a tradeoff among latency, efficiency, and hardware behavior.
 
 1. TBT(TPOT) SLO (primary constraint)
 
-   Since the point of having a token budget is to satisfy the decode SLOs, the budget must be small enough to avoid exceeding the minimum requirement. If too many prefill tokens are included, decode iterations get delayed, causing generation stalls.
+   Since the point of having a token budget is to satisfy the decode SLOs, the budget must be small enough to avoid exceeding the requirement. If too many prefill tokens are included, decode iterations get delayed, causing generation stalls.
 
 2. **Tile Quantization**  
 
@@ -441,15 +441,15 @@ Choosing the token budget is a tradeoff between latency, efficiency, and hardwar
   <img
     src="../assets/notes/sarathi-serve/sarathi-serve-21-evaluation-results.png"
     alt="Sarathi-Serve evaluation results under SLO-constrained serving"
-    width="720"
+    width="620"
   />
   <br />
   <sub>Figure 21. Under SLO-constrained serving, Sarathi-Serve improves serving capacity across models and setups.<sup><a href="#reference-1">[1]</a></sup></sub>
 </p>
 
-As a result of what we've talked about so far, Sarathi-Serve consistently improves serving capacity across models, with gains of up to 2.6× ~ 5.6× depending on the model/parallelism, under realistic workloads.
+As a result of what we have talked about so far, Sarathi-Serve consistently improves serving capacity across models, with gains of about 2.6× to 5.6× depending on the model and parallelism, under realistic workloads.
 
-Unlike other benchmarks from previous papers, Sarathi-Serve especially used the throughput gain **under SLOs** which was interesting.
+Unlike benchmarks in some previous papers, Sarathi-Serve specifically measured throughput gains under SLOs, which I found interesting.
 
 ## References
 <ol>
