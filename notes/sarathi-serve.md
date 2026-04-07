@@ -37,7 +37,6 @@ So the first takeaway is:
 
 > The two phases of LLM inference, prefill and decode, demonstrate contrasting behaviors wherein batching boosts decode phase throughput immensely but has little effect on prefill throughput.
 
----
 
 Now let's talk about how to measure the total execution time in LLM inference. Not only LLM inference, but if it's a program that does something repetitively, it's either bound by time computing the data or time loading and saving the memory of the data.
 
@@ -85,7 +84,6 @@ This also means that theoretically, there is no additional cost of the lower cos
 >
 > This implies that more tokens can be processed along with a decode batch without significantly increasing its latency.
 
----
 
 
 Now we will review on the earlier inference engines which are FasterTransformer, Orca, and vLLM (v0). We will first compare FasterTransformer and vLLM v0 and then talk about Orca.
@@ -171,7 +169,6 @@ Note: The attention-related term is not directly observable as a single per-requ
 >
 > Another takeaway I want to explicitly mention (while already explained implicitly) is that not all step sizes are the same. Decode steps finish much more quickly, prefill steps take longer, and a hybrid batch of them takes even longer than that due to overhead.
 
----
 
 ### Pipeline Parallelism
 
@@ -213,7 +210,6 @@ For example in the image above, GPU0 processes C and D's prefill and is done whi
 
 > Again, step sizes are NOT the same. This can lead to large variance in compute time of LLM iterations, depending on composition of prefill- and decode-tokens in the batch. This introduces  significant bubbles when using pipeline-parallelism.
 
----
 
 ## Sarathi-Serve
 
@@ -246,6 +242,7 @@ By using chunked prefill, it allows us to process part of it per step. This allo
   <br />
   <sub>Figure 10. Chunked prefill breaks a long prefill into smaller pieces that can be scheduled across steps.</sub>
 </p>
+
 ### Overhead
 
 Chunked prefill introduces additional overhead compared to standard prefill. In a regular prefill, all input tokens are processed in a single pass, so there is no need to revisit previously computed KV states.
@@ -265,6 +262,7 @@ This results in extra memory reads due to KV cache re-access.
 </p>
 
 In practice, this overhead remains modest because prefill is largely compute-bound so the additional KV reads have limited impact on overall runtime. According to the ablation study section, the overhead is at most around ~25% for small chunk sizes and becomes negligible for larger chunks.
+
 
 ### Stall Free Batching
 
