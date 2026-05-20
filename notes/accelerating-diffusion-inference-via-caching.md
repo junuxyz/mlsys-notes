@@ -10,7 +10,7 @@ At a high level, a diffusion model works by progressively adding noise to an ima
 
 ## Diffusion Inference vs LLM Inference
 
->[!Note] Note
+> [!NOTE]
 > "LLM inference" here excludes Text Diffusion / Diffusion LLMs, which blend language modeling with diffusion-style generation.)
 
 <p align="center">
@@ -38,7 +38,7 @@ At the algorithmic layer, diffusion inference acceleration is often approached i
 <p align="center">
   <img src="../assets/notes/accelerating-diffusion-inference-via-caching/accelerating-diffusion-inference-via-caching-3.png" width="520" />
   <br />
-  <sub>Figure 3. More aggressive compression can reduce visual quality even when latency improves.<sup><a href="#reference-1">[1]</a></sup></sub>
+  <sub>Figure 3. More aggressive compression can reduce visual quality even when latency improves. Credit: SqueezeBits.<sup><a href="#reference-1">[1]</a></sup></sub>
 </p>
 
 As we reduce the model size or numerical precision, expressive power and accuracy can decline if the compression is too aggressive. Some accelerated/distilled pipelines also disable or weaken classifier-free guidance (CFG), which can make negative prompts less effective. A case study by the SqueezeBits team<sup><a href="#reference-1">[1]</a></sup> illustrates the practical quality-efficiency tradeoff well. Additionally distillation and pruning typically require extra training or fine-tuning, which comes with a non-negligible cost.
@@ -56,7 +56,7 @@ FBCache (First Block Cache)<sup><a href="#reference-4">[4]</a></sup> is an appro
 <p align="center">
   <img src="../assets/notes/accelerating-diffusion-inference-via-caching/accelerating-diffusion-inference-via-caching-4.png" width="620" />
   <br />
-  <sub>Figure 4. FBCache checks the first block and reuses the cached full output when the feature change is small.<sup><a href="#reference-5">[5]</a></sup></sub>
+  <sub>Figure 4. FBCache checks the first block and reuses the cached full output when the feature change is small. Credit: Semih Berkay Ozturk.<sup><a href="#reference-5">[5]</a></sup></sub>
 </p>
 
 To do this, we run only the first Transformer block of each step. Each step typically consists of multiple blocks, which can be represented as:
@@ -82,7 +82,7 @@ This relies on the observation that features in diffusion models tend to change 
 <p align="center">
   <img src="../assets/notes/accelerating-diffusion-inference-via-caching/accelerating-diffusion-inference-via-caching-5.png" width="620" />
   <br />
-  <sub>Figure 5. TaylorSeer motivates feature forecasting by showing smooth feature and derivative trajectories across denoising steps.<sup><a href="#reference-6">[6]</a></sup></sub>
+  <sub>Figure 5. TaylorSeer motivates feature forecasting by showing smooth feature and derivative trajectories across denoising steps. Credit: Liu et al.<sup><a href="#reference-6">[6]</a></sup></sub>
 </p>
 
 As shown above, both the features and their derivatives follow a relatively smooth trajectory without significant random changes. TaylorSeer assumes that feature representations evolve smoothly over time, making it possible to extrapolate future features from previous feature states.
@@ -93,8 +93,8 @@ As shown above, both the features and their derivatives follow a relatively smoo
 
 Intuitively, if we know the current value, its rate of change, and higher-order change patterns, we can estimate how the function will behave slightly before or after the current point $a$. This video may help to gain stronger intuition on the concept of Taylor Series.<sup><a href="#reference-7">[7]</a></sup>
 
->[!Note]
->From here, we will use $\mathcal{F}_{\mathrm{pred}}$ as the Taylor polynomial used for approximating the actual feature function $\mathcal{F}$.
+> [!NOTE]
+> From here, we will use $\mathcal{F}_{\mathrm{pred}}$ as the Taylor polynomial used for approximating the actual feature function $\mathcal{F}$.
 
 Intuitively, the more information we have about how the feature changes, the better we can approximate its future value. For example, a second-order approximation that uses both the slope and curvature can capture the trajectory more accurately than a first-order approximation that uses only the slope.
 
@@ -134,7 +134,7 @@ where $x_t^{l}$ is the current timestep and $k$ is the number of denoising steps
 
 Unlike cache reuse, which only requires caching the latent feature itself, linear prediction additionally requires saving the derivative of latent feature:
 
-$$C\left(x_t^{l}\right) := \left\{ \mathcal{F}\left(x_t^{l}\right), \Delta \mathcal{F}\left(x_t^{l}\right) \right\}$$
+$$C\left(x_t^{l}\right) := \{ \mathcal{F}\left(x_t^{l}\right), \Delta \mathcal{F}\left(x_t^{l}\right) \}$$
 
 where
 
@@ -152,8 +152,8 @@ $$\Delta^{i}\mathcal{F}\left(x_t^{l}\right) = \Delta\left(\Delta^{i-1}\mathcal{F
 
 This requires more cached finite-difference states and slightly more bookkeeping, but it avoids additional full forward passes.
 
->[!Note] Note
->Higher-order TaylorSeer does perform more arithmetic than direct cache reuse due to it evaluating more polynomial terms and store more finite-difference tensors. However, those operations are negligible compared to running the denoising block itself. So as long as higher-order forecasting lets us skip those block computations, the extra polynomial bookkeeping can be ignored.
+> [!NOTE]
+> Higher-order TaylorSeer does perform more arithmetic than direct cache reuse due to it evaluating more polynomial terms and store more finite-difference tensors. However, those operations are negligible compared to running the denoising block itself. So as long as higher-order forecasting lets us skip those block computations, the extra polynomial bookkeeping can be ignored.
 
 A $m$-dimensional prediction function is
 
@@ -169,14 +169,14 @@ As an intuitive example, if we want to use a 3rd-order Taylor approximation, we 
 
 If we generalize this, computing an $i$-th order finite difference requires $i+1$ values. Thus we additionally save the $m(m \geq 2)$ derivatives corresponding to the chosen Taylor order:
 
-$$C\left(x_t^{l}\right) := \left\{ \mathcal{F}\left(x_t^{l}\right), \Delta \mathcal{F}\left(x_t^{l}\right), \ldots, \Delta^{m}\mathcal{F}\left(x_t^{l}\right) \right\}$$
+$$C\left(x_t^{l}\right) := \{ \mathcal{F}\left(x_t^{l}\right), \Delta \mathcal{F}\left(x_t^{l}\right), \ldots, \Delta^{m}\mathcal{F}\left(x_t^{l}\right) \}$$
 
 However, increasing the Taylor order does not always improve prediction quality. Higher-order terms can reduce approximation error when the feature trajectory is smooth, but TaylorSeer does not compute exact derivatives; it estimates them from previously computed features using finite differences. These higher-order finite-difference estimates become increasingly sensitive to approximation error, discretization noise, and small irregularities in the feature trajectory. As a result, adding more Taylor terms can eventually amplify error rather than reduce it, which leads to diminishing returns beyond a certain order.
 
 <p align="center">
   <img src="../assets/notes/accelerating-diffusion-inference-via-caching/accelerating-diffusion-inference-via-caching-7.png" width="620" />
   <br />
-  <sub>Figure 7. TaylorSeer reaches about 5x FLOPs speedup while staying close to the full-compute baseline on FLUX.1-dev.<sup><a href="#reference-6">[6]</a></sup></sub>
+  <sub>Figure 7. TaylorSeer reaches about 5x FLOPs speedup while staying close to the full-compute baseline on FLUX.1-dev. Credit: Liu et al.<sup><a href="#reference-6">[6]</a></sup></sub>
 </p>
 
 TaylorSeer makes high-ratio caching practical. Instead of topping out around 2-3x before quality collapses, it reaches roughly ~5x FLOPs speedup on FLUX.1 dev and HunyuanVideo while staying close to the full-compute baseline. For FLUX.1 dev, it generated about 5x less compute, with ImageReward slightly higher than the 50-step baseline (1.0039 vs. 0.9898).
@@ -218,7 +218,7 @@ This is relatively straightforward. The two questions we need to solve are:
 <p align="center">
   <img src="../assets/notes/accelerating-diffusion-inference-via-caching/accelerating-diffusion-inference-via-caching-8.png" width="540" />
   <br />
-  <sub>Figure 8. SpeCa verifies a speculative Taylor step by comparing predicted and actually computed hidden states at a deep transformer layer.<sup><a href="#reference-9">[9]</a></sup></sub>
+  <sub>Figure 8. SpeCa verifies a speculative Taylor step by comparing predicted and actually computed hidden states at a deep transformer layer. Credit: Liu et al.<sup><a href="#reference-9">[9]</a></sup></sub>
 </p>
 
 To answer both questions at once, SpeCa uses a deep transformer layer as a lightweight verification point. During Taylor steps, most block computations are replaced with TaylorSeer-predicted attention/MLP features. At the verification layer, SpeCa compares the Taylor-predicted hidden state with the hidden state obtained by actually executing that layer from the same incoming activation.
@@ -240,7 +240,7 @@ While it is ultimately a heuristic, the authors offer empirical support for this
 <p align="center">
   <img src="../assets/notes/accelerating-diffusion-inference-via-caching/accelerating-diffusion-inference-via-caching-9.png" width="500" />
   <br />
-  <sub>Figure 9. Deeper transformer-layer activation error correlates more strongly with final output error than shallow-layer error.<sup><a href="#reference-9">[9]</a></sup></sub>
+  <sub>Figure 9. Deeper transformer-layer activation error correlates more strongly with final output error than shallow-layer error. Credit: Liu et al.<sup><a href="#reference-9">[9]</a></sup></sub>
 </p>
 
 Their layer-wise analysis shows that deeper-layer activation error correlates better with final output error than shallow-layer error.
@@ -250,7 +250,7 @@ For example in DiT-XL/2, layer 27 (the latter layer) is reported to correlate wi
 <p align="center">
   <img src="../assets/notes/accelerating-diffusion-inference-via-caching/accelerating-diffusion-inference-via-caching-10.png" width="540" />
   <br />
-  <sub>Figure 10. SpeCa improves high-speed caching by adding verification, reducing quality loss at aggressive FLOPs speedups.<sup><a href="#reference-9">[9]</a></sup></sub>
+  <sub>Figure 10. SpeCa improves high-speed caching by adding verification, reducing quality loss at aggressive FLOPs speedups. Credit: Liu et al.<sup><a href="#reference-9">[9]</a></sup></sub>
 </p>
 
 As a result, SpeCa makes more aggressive (5x+) caching safer. While the speedup does not improve dramatically compared to TaylorSeer's already strong baseline, SpeCa pushes beyond it while preserving image quality. The key is the lightweight verification step, which detects when TaylorSeer forecasts drift too far and forces a full refresh before error accumulation becomes visible. On FLUX.1-dev, for example, SpeCa reaches **6.34x FLOPs speedup** with **ImageReward 0.9355**, while TaylorSeer at a similar 6.24x FLOPs speedup drops to 0.8168.
