@@ -15,6 +15,10 @@ Currently focusing on LLM serving system and inference optimization.
 - [How Multiprocess Serving Works in vLLM](notes/how-mp-serving-works-in-vllm.md)
 - [Tensor Parallelism](notes/distributed/tp.md)
 
+### GPU
+- [NVIDIA GPU Architecture: From GPC to SM](notes/gpu/gpu-architecture.md)
+- [GPU Memory Hierarchy in CUDA](notes/gpu/gpu-memory-hierarchy.md)
+
 ### Diffusion
 - [Accelerating Diffusion Inference via Caching](notes/accelerating-diffusion-inference-via-caching.md)
 
