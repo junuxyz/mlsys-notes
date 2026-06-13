@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mlsys-notes"
+name = "mlsys-labs"
 version = "0.0.0"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = [
     "accelerate>=1.13.0",
     "torch>=2.10.0",
@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py313"
 line-length = 88
 
 [tool.ruff.lint]
@@ -35,17 +35,25 @@ ignore = [
 dev = [
     "black>=24.0.0",
     "pre-commit>=4.5.1",
+    "pytest>=9.0.0",
     "ruff>=0.15.6",
 ]
 
 [tool.black]
 line-length = 88
-target-version = ["py312"]
+target-version = ["py313"]
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["labs*"]
+where = [".."]
+include = [
+    "labs*",
+]
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
-testpaths = ["labs"]
+pythonpath = [".."]
+testpaths = ["."]
+
+[tool.uv.workspace]
+members = [
+    "triton-kernels",
+]

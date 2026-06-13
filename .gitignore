@@ -1,6 +1,9 @@
 /.venv
 /.pytest_cache
 /.ruff_cache
+/labs/.venv
+/labs/.pytest_cache
+/labs/.ruff_cache
 
 **/__pycache__/
 *.pyc
