@@ -3,13 +3,15 @@ repos:
     hooks:
       - id: ruff-check
         name: ruff check
-        entry: uv run ruff check --fix
+        entry: uv --project labs run ruff check --fix
         language: system
         types: [python]
+        files: ^labs/
         require_serial: true
       - id: black
         name: black
-        entry: uv run black
+        entry: uv --project labs run black
         language: system
         types: [python]
+        files: ^labs/
         require_serial: true
