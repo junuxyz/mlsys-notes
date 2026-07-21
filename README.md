@@ -12,16 +12,16 @@ Currently focusing on LLM serving system and inference optimization.
 
 ### Inference Engine
 - [tinyorca deep dive](notes/tinyorca.md)
-- [Inside nano-vLLM](inside-nano-vllm.md)
-- [How Multiprocess Serving Works in vLLM](notes/how-mp-serving-works-in-vllm.md)
+- [Inside nano-vLLM](notes/vllm/inside-nano-vllm.md)
+- [How Multiprocess Serving Works in vLLM](notes/vllm/how-mp-serving-works-in-vllm.md)
 ### Distributed
 - [Sarathi-Serve paper review](notes/sarathi-serve.md)
 - [Tensor Parallelism](notes/distributed/tp.md)
 - [Pipeline Parallelism](notes/distributed/pp.md)
 
 ### Hardware
-- [NVIDIA GPU Architecture: From GPC to SM](gpu-architecture.md)
-- [GPU Memory Hierarchy in CUDA](gpu-memory-hierarchy.md)
+- [NVIDIA GPU Architecture: From GPC to SM](notes/accelerators/gpu-architecture.md)
+- [GPU Memory Hierarchy in CUDA](notes/accelerators/gpu-memory-hierarchy.md)
 
 ### Diffusion
 - [Accelerating Diffusion Inference via Caching](notes/accelerating-diffusion-inference-via-caching.md)
@@ -29,3 +29,4 @@ Currently focusing on LLM serving system and inference optimization.
 ## Labs
 - [microengine](labs/microengine/README.md): a minimal serving engine
 - [tinyorca](https://github.com/junuxyz/tinyorca): a minimal implementation of [ORCA](https://www.usenix.org/system/files/osdi22-yu.pdf)
+- [tiny-speculators](https://github.com/junuxyz/tiny-speculators): a from-scratch implementation of speculative decoding model training.
