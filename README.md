@@ -14,6 +14,7 @@ Currently focusing on LLM serving system and inference optimization.
 - [tinyorca deep dive](notes/tinyorca.md)
 - [Inside nano-vLLM](notes/vllm/inside-nano-vllm.md)
 - [How Multiprocess Serving Works in vLLM](notes/vllm/how-mp-serving-works-in-vllm.md)
+
 ### Distributed
 - [Sarathi-Serve paper review](notes/sarathi-serve.md)
 - [Tensor Parallelism](notes/distributed/tp.md)
@@ -22,6 +23,9 @@ Currently focusing on LLM serving system and inference optimization.
 ### Hardware
 - [NVIDIA GPU Architecture: From GPC to SM](notes/accelerators/gpu-architecture.md)
 - [GPU Memory Hierarchy in CUDA](notes/accelerators/gpu-memory-hierarchy.md)
+- [CUDA Intro](notes/accelerators//cuda-intro.md)
+- [[KR] NPU Memory Architecture and Data Reuse](notes/accelerators/kr_npu_memory_arch_and_data_reuse.pdf)
+
 
 ### Diffusion
 - [Accelerating Diffusion Inference via Caching](notes/accelerating-diffusion-inference-via-caching.md)
