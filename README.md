@@ -20,6 +20,7 @@ Currently focusing on LLM serving system and inference optimization.
 - [Sarathi-Serve paper review](notes/sarathi-serve.md)
 - [Tensor Parallelism](notes/distributed/tp.md)
 - [Pipeline Parallelism](notes/distributed/pp.md)
+- [Recovering NVLS on H100](notes/distributed/recovering-nvls-on-h100.md)
 
 ### Hardware
 - [NVIDIA GPU Architecture: From GPC to SM](notes/accelerators/gpu-architecture.md)
