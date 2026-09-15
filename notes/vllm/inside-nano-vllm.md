@@ -702,6 +702,9 @@ If the number of new blocks needed is more than the free blocks that can be allo
 > In this case, the hash differs. Check out a minimal experiment done here<sup><a href="#reference-7">[7]</a></sup>
 > 
 
+> [!NOTE]
+> Edit: I've found a [great resource](https://sankalp.bearblog.dev/how-prompt-caching-works/) that explains prefix caching in details. Check them out if you're interested.
+
 After checking if allocating blocks for the Sequence is possible, we need to actually allocate the blocks. This is done by `allocate()`.
 
 `allocate()` allocates free physical KV blocks to each Sequence, where each Sequence has a Block Table that maps logical KV blocks (0, 1, 2, ...) to physical KV blocks. Internally, Block Manager has a queue called `free_block_ids`, which pops a free block and appends it to the sequence's page table.
