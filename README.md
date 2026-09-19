@@ -15,6 +15,7 @@ Currently focusing on LLM serving system and inference optimization.
 - [tinyorca deep dive](notes/tinyorca.md)
 - [Inside nano-vLLM](notes/vllm/inside-nano-vllm.md)
 - [How Multiprocess Serving Works in vLLM](notes/vllm/how-mp-serving-works-in-vllm.md)
+- [Comparing Round-Robin Routing vs KV-Aware Routing on Nemotron-3-Nano](https://github.com/Prasannajaga/deployment-guide/blob/main/blogs/rr-vs-kv-aware-routing.md)
 
 ### Distributed
 - [Sarathi-Serve paper review](notes/sarathi-serve.md)
