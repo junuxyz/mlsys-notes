@@ -76,7 +76,9 @@ For speculative sampling to match $p(x)$, these two terms must add up to $p(x)$.
 
 Now let's check the two cases.
 
-### case 1. undersampled ($p(x) > q(x)$)
+### case 1. undersampled
+
+$p(x) > q(x)$
 
 Say $q(x)=0.2$ and $p(x)=0.5$, which means the draft proposes $x$ less often than the target would. If the draft happens to draw $x$ anyway, it's accepted 100% of the time. Why is that safe? The accept term cannot contribute more than $q(x)$, and $q(x)$ is smaller than $p(x)$. In other words, accepting every proposal of $x$ contributes only $0.2$, so it cannot overshoot the target's $0.5$. The remaining $0.3$ of total output probability comes from rejection and resampling.
 
@@ -87,13 +89,15 @@ Say $q(x)=0.2$ and $p(x)=0.5$, which means the draft proposes $x$ less often tha
 > 
 > In short, multiple splits can reproduce the target distribution, but assigning as much probability as possible to acceptance avoids unnecessary rejections. That's why the acceptance rule uses $\min(q(x),p(x))$.
 
-### case 2. oversampled ($p(y) < q(y)$)
+### case 2. oversampled
+
+$p(y) < q(y)$
 
 This time, say $q(y)=0.5$ and $p(y)=0.2$, which means the draft proposes token $y$ more often than the target would. We cannot accept every proposal of $y$, since that would give it too much output probability. Instead, we accept it with probability $p(y)/q(y)=0.2/0.5=0.4$.
 
 What does this $0.4$ mean? When $y$ is proposed, it has a $0.4$ chance of being accepted. Since $y$ is proposed with probability $0.5$, its total accepted probability is $0.5 \times 0.4=0.2=p(y)$! So $y$ can still be accepted even when $q(y)>p(y)$.
 
-Let's say we land in the other $60\%$ and reject $y$. We then resample, but not directly from the target distribution. We use the normalized residual distribution $p'(i) \propto \max(p(i)-q(i),0)$, where $i$ ranges over all vocabulary tokens.
+Let's say we land in the other 60% and reject $y$. We then resample, but not directly from the target distribution. We use the normalized residual distribution $p'(i) \propto \max(p(i)-q(i),0)$, where $i$ ranges over all vocabulary tokens.
 
 Why $p(i)-q(i)$?
 

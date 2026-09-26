@@ -9,6 +9,7 @@ Currently focusing on LLM serving system and inference optimization.
 - [ORCA paper review](notes/orca.md)
 - [PagedAttention paper review](notes/pagedattention.md)
 - [Softmax: From Naive to Blocked Softmax](notes/softmax.md)
+- [Rejection Sampling in Speculative Decoding](notes/speculative-decoding-rejection-sampling.md)
 - [Triton Notes](https://junupark.xyz/triton-notes/)
 
 ### Inference Engine
