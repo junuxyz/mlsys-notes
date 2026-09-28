@@ -104,3 +104,51 @@ Why $p(i)-q(i)$?
 When $q(i)>p(i)$, we accept proposed token $i$ with probability $a(i)=p(i)/q(i)$, so $P(i\text{ accepted})=p(i)$. Resampling $i$ would overshoot its target probability, so its residual weight is zero.
 
 Remember $x$ from Case 1, still $0.3$ short of its target. A rejected proposal, including a rejected $y$, can produce $x$ through residual sampling. Across all rejections, this supplies the missing $0.3$ of total output probability. The residual distribution therefore assigns weight only to tokens whose target probability exceeds the probability already supplied by accepted proposals.
+
+## how it is implied in code
+
+How is rejection sampling implied in code? As a reference, we will look into `_rejection_sample` function provided from [Z Lab's official repository of DFlash](https://github.com/z-lab/dflash) (intentionally removed DFlash2 part):
+
+```python
+def _rejection_sample(
+    draft_tokens: torch.Tensor, # [B, T - 1]
+    target_probs: torch.Tensor, # [B, T, vocab]
+    draft_probs: torch.Tensor, # [B, T - 1, vocab]
+) -> tuple[int, torch.Tensor]:
+    gamma = draft_tokens.shape[1] # gamma = T-1
+    # gather must match the dimension
+    # p: target probability of the token ids draft model proposed
+    p = target_probs[:, :gamma].gather(-1, draft_tokens[..., None])[..., 0]
+	q = draft_probs.gather(-1, draft_tokens[..., None])[..., 0]
+
+    # r * q < p where 0 <= r < 1; so r < p/q
+    # if p >= q: always accept
+    # else (p < q): accept it in the probability of p/q
+    accepted = (
+        (torch.rand_like(q) * q < p).to(torch.int32).cumprod(-1).sum(-1)[0].item()
+    )
+
+    # return bonus token only if all draft tokens are accepted
+    if accepted == gamma:
+        return accepted, _sample_probs(target_probs[:, -1])[0]
+
+    # target probability distribution
+    # at the first rejected draft-token position
+    residual = target_probs[0, accepted].clone()
+	residual.sub_(draft_probs[0, accepted])
+
+    # `clamp_min(val)` refers to at least val
+    residual.clamp_min_(0)
+    total = residual.sum()
+    # reconstruct the residual distribution based on p-q
+    residual = torch.where(
+        total > 0,
+        # avoid divide-by-zero by torch.finfo(residual.dtype).tiny
+        # `.tiny` returns the smallest positive normal number of
+        # that dtype e.g. float32: 1.175e-38
+        residual / total.clamp_min(torch.finfo(residual.dtype).tiny),
+        target_probs[0, accepted],
+    )
+    # resample from residual probability distribution
+    return accepted, _sample_probs(residual[None])[0]
+```
