@@ -273,4 +273,4 @@ Then the final softmax value is computed as:
 ```
 
 
-The full code from naive softmax to blocked softmax can be found [here](https://github.com/junuxyz/mlsys-notes/blob/main/labs/flash_attn/softmax.py)(~100 lines of easy python code). It will be very easy to read after you've read this section.
+The full code from naive softmax to blocked softmax can be found [here](https://github.com/junuxyz/mlsys-notes/blob/b14f40a522c901afdc1b99d44ba6b1f7956928cc/labs/flash_attn/softmax.py)(~100 lines of easy python code). It will be very easy to read after you've read this section.

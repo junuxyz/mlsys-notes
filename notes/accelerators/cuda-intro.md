@@ -1,10 +1,12 @@
+_Compatible resource: check https://brrrviz.com/ for visual explanation! They are very useful to grasp things intuitively. I also used figures from them in this note._
+
 GPU is based on SIMT(Single Instruction, Multiple Threads). This means it executes instruction across multiple threads. Group of threads is controlled by control unit called SM.
 SM executes a _warp_ which is a group of 32 threads.
 
 SIMT is a variation of SIMD but there is an important distinction. SIMD deterministically executes one instruction. SIMT on the other hand, allows divergent workflow among threads in a group(e.g. if-else branch). However this does add performance penalty.
 
 <p align="center">
-  <img src="/assets/notes/cuda-intro/cuda-intro-1.png" width="620" />
+  <img src="../../assets/notes/cuda-intro/cuda-intro-1.png" width="620" />
   <br />
   <sub>Figure 1. Warp divergence causes threads in the same warp to follow different execution paths.</sub>
 </p>
@@ -76,7 +78,7 @@ However, data may migrate between CPU and GPU memory at runtime, and page faults
 ### grid, block, and thread
 
 <p align="center">
-  <img src="/assets/notes/cuda-intro/cuda-intro-2.png" width="540" />
+  <img src="../../assets/notes/cuda-intro/cuda-intro-2.png" width="540" />
   <br />
   <sub>Figure 2. A CUDA kernel launches a grid composed of thread blocks, each containing multiple threads.</sub>
 </p>
@@ -105,7 +107,7 @@ Syntax for grid, block, and dim can feel kind of 헷갈림 so I'll make it clear
 Think of index as the i'th local location and dimension as the size of the thread or block.
 
 <p align="center">
-  <img src="/assets/notes/cuda-intro/cuda-intro-3.png" width="700" />
+  <img src="../../assets/notes/cuda-intro/cuda-intro-3.png" width="700" />
   <br />
   <sub>Figure 3. <code>threadIdx</code> identifies a thread within its block, while <code>blockIdx</code> identifies the block within the grid.</sub>
 </p>
@@ -187,10 +189,27 @@ When threads cooperate, execution order and finish time is non-deterministic. In
 ## a typical processing flow
 
 <p align="center">
-  <img src="/assets/notes/cuda-intro/cuda-intro-4.png" width="540" />
+  <img src="../../assets/notes/cuda-intro/cuda-intro-4.png" width="540" />
   <br />
   <sub>Figure 4. A typical CUDA program allocates device memory, transfers inputs, launches a kernel, and copies results back to the host.</sub>
 </p>
 
+
+### more on warp divergence
+
+![Pasted image 20260726162812](../../assets/notes/cuda-intro/cuda-intro-5.png)
+Figure from https://brrrviz.com/warp-divergence/uniform-control-flow
+
+Without warp divergence, we can achieve 100% utilization without speed decrease. However we may face warp divergence, which leads to increased latency due to branches (if branch, for loop, or case)
+
+e.g. if branch:
+![Pasted image 20260726162925](../../assets/notes/cuda-intro/cuda-intro-6.png)
+Figure: https://brrrviz.com/warp-divergence/conditional-branches
+
+
+Solution to avoid warp divergence is to either
+1. [sort data](https://brrrviz.com/warp-divergence/data-sorting) so adjacent threads then follow the same path
+2. use masks to operate only on valid items
+3. load balance well so execution time doesn't differ from each threads
 
 

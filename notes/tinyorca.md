@@ -4,7 +4,7 @@
 
 This article explains Orca<sup><a href="#reference-1">[1]</a></sup> through a minimal implementation, **[tinyorca](https://github.com/junuxyz/tinyorca)**. Rather than covering the full distributed serving system, we focus on the two core ideas introduced in the paper: iteration-level scheduling and selective batching.
 
-Iteration-level scheduling allows the engine to admit a new request as soon as another completes, while selective batching enables requests at different stages to be processed together. Before diving into these concepts, we briefly outline the architecture of tinyorca and the lifecycle of a request.
+Iteration-level scheduling allows the engine to admit a new request as soon as another completes, while selective batching enables requests at different stages to be processed together. Before diving into these concepts, I will briefly outline the architecture of tinyorca and the lifecycle of a request.
 
 ## Architecture Overview
 
@@ -48,7 +48,7 @@ A request starts in `WAITING`, remains in the `RequestPool` until admitted, and 
 
 With these in mind, we now focus on the two main ideas from the paper.
 
-The first is iteration-level scheduling, which changes when the scheduler can reconsider the active set of requests.
+The first is iteration-level scheduling, which means the scheduler can reconsider the active set of requests on every iteration.
 
 ## Deep dive into Iteration-level Scheduling
 
@@ -64,7 +64,7 @@ Older systems (e.g., FasterTransformer) did support batching but in a naive way.
 1. when the serving system scheduled a new batch on an idle engine
 2. when the engine finished processing the current batch
 
-In other words, scheduling happened at the granularity of requests rather than iterations (steps). Here, _granularity_ just means the size of unit at which scheduling decisions are made.
+In other words, scheduling happened at the granularity of requests rather than iterations (steps). Here, _granularity_ means the size of unit at which scheduling decisions are made.
 
 This is known as _static batching_: once a batch is formed, it remains fixed until all requests in the batch complete. Early-finished requests leave idle slots (see the empty slots in the figure below, or in tinyorca’s [demo](https://github.com/junuxyz/tinyorca/tree/main)), while queued requests cannot join until the longest-running request finishes.<sup><a href="#reference-3">[3]</a></sup>
 
@@ -428,7 +428,7 @@ Despite the limitation, we can still observe the advantages of iteration level s
 
 ## Benchmark
 
-> **Caveat**: These numbers were collected on my laptop GPU (RTX 3050 Ti), which is not ideal for benchmarking. Treat them as illustrative prototype measurements!
+> **Caveat**: These numbers were collected on my laptop GPU (RTX 3050 Ti), which is not ideal for benchmarking. Treat them as illustrative prototype measurements.
 
 This benchmark uses two synthetic workloads:
 1. `equal_size`: 16 requests of `(128, 128)`. This is the control case. Iteration level scheduling does not help much here because requests in the batch start and finish at roughly the same time. The token lengths are also intentionally modest because I am working with less than 4 GB of VRAM.

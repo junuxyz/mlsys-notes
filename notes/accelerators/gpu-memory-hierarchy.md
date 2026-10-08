@@ -7,7 +7,7 @@ This note focuses on the CUDA programmer's view: registers, shared memory, local
 ## On-chip vs off-chip memory
 
 <p align="center">
-  <img src="/assets/notes/gpu-memory-hierarchy/gpu-memory-hierarchy-1.png" width="540" />
+  <img src="../../assets/notes/gpu-memory-hierarchy/gpu-memory-hierarchy-1.png" width="540" />
   <br />
   <sub>Figure 1. A simplified on-chip/off-chip memory hierarchy for GPU systems.</sub>
 </p>
@@ -25,7 +25,7 @@ That is why high-performance CUDA kernels try to reuse data in registers and sha
 ## CUDA memory spaces
 
 <p align="center">
-  <img src="/assets/notes/gpu-memory-hierarchy/gpu-memory-hierarchy-2.png" width="540" />
+  <img src="../../assets/notes/gpu-memory-hierarchy/gpu-memory-hierarchy-2.png" width="540" />
   <br />
   <sub>Figure 2. CUDA memory spaces organized by location, visibility, and programmer control.<sup><a href="#reference-1">[1]</a></sup></sub>
 </p>
@@ -120,7 +120,7 @@ In short, constant memory is a specialized path for small read-only data with fa
 ## Two useful mental models
 
 <p align="center">
-  <img src="/assets/notes/gpu-memory-hierarchy/gpu-memory-hierarchy-3.png" width="540" />
+  <img src="../../assets/notes/gpu-memory-hierarchy/gpu-memory-hierarchy-3.png" width="540" />
   <br />
   <sub>Figure 3. Memory hierarchy diagram from <em>Programming Massively Parallel Processors</em>.<sup><a href="#reference-4">[4]</a></sup></sub>
 </p>
@@ -128,7 +128,7 @@ In short, constant memory is a specialized path for small read-only data with fa
 First, memory is a hierarchy of capacity and latency. Registers and shared memory are precious because they are close to the SM. Global memory is plentiful, but every unnecessary trip to it costs time.
 
 <p align="center">
-  <img src="/assets/notes/gpu-memory-hierarchy/gpu-memory-hierarchy-4.png" width="420" />
+  <img src="../../assets/notes/gpu-memory-hierarchy/gpu-memory-hierarchy-4.png" width="420" />
   <br />
   <sub>Figure 4. CUDA memory hierarchy summary from Modal's GPU glossary.<sup><a href="#reference-5">[5]</a></sup></sub>
 </p>

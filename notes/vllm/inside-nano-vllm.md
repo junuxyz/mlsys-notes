@@ -1297,7 +1297,7 @@ If a weight corresponds to a packed module, this part remaps it and loads it int
 According to the vLLM-omni documentation<sup><a href="#reference-10">[10]</a></sup>, a useful formula for memory calculation is to calculate the total available VRAM - model weight memory - activation memory.
 
 <p align="center">
-  <img src="../assets/notes/inside-nano-vllm/inside-nano-vllm-4.png" width="540" />
+  <img src="../../assets/notes/inside-nano-vllm/inside-nano-vllm-4.png" width="540" />
   <br />
   <sub>Figure 4. Example of remaining VRAM headroom after loading about 64 GB of model weights: roughly 16 GB for KV cache, activations, workspace buffers, and runtime overhead.<sup><a href="#reference-11">[11]</a></sup><sup><a href="#reference-12">[12]</a></sup></sub>
 </p>

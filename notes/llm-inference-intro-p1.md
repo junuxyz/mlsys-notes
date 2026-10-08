@@ -87,7 +87,7 @@ The roofline model<sup><a href="#reference-8">[8]</a></sup> turns that intuition
 <p align="center">
   <img src="../assets/notes/llm-inference-intro-p1/llm-inference-intro-p1-4.png" width="540" />
   <br />
-  <sub>Figure 4. A literal roof image to build intuition for why the roofline model has a sloped section and a flat ceiling.<sup><a href="#reference-9">[9]</a></sup></sub>
+  <sub>Figure 4. A literal roof image.<sup><a href="#reference-9">[9]</a></sup></sub>
 </p>
 
 Before the turning point where the line flattens, performance is limited by memory bandwidth. After that point, it is limited by compute throughput. The shape looks like a roof because modern chips can add arithmetic capacity more easily than memory bandwidth; it is much easier to add more math than to feed that math with data.
@@ -758,7 +758,7 @@ $$
 AI_{\text{prefill}}(1000) \approx 1012.9 \ \text{FLOPs/byte}
 $$
 
-Even after including the smaller per-layer terms, prefill stays comfortably on the compute-favored side of the H100 roofline.
+Even after including the smaller per-layer terms, prefill stays on the compute-bound side of the H100 roofline.
 
 ### decode FLOPs
 
@@ -922,7 +922,7 @@ $$
 F_{\text{lm head}} \approx 2 \cdot 5120 \cdot 151{,}936 = 1{,}555{,}824{,}640
 $$
 
-That term can be significant, but it should be tracked separately because it is not part of the repeated transformer-block total.
+This term can be significant, but it should be tracked separately because it is not part of the repeated transformer layer.
 
 ### bytes moved during decode
 
@@ -997,7 +997,7 @@ $$
 AI_{\text{decode}}(L) \to \frac{2{,}117{,}632}{262{,}144} \approx 8.08 \ \text{FLOPs/byte}
 $$
 
-Those numbers are only slightly different from the dominant-terms-only version. That is why the main text does not need to dwell on every small term: once you include RMSNorm, RoPE, softmax, residual adds, and gating terms, the qualitative conclusion does not change. Decode stays firmly memory-bound.
+We can conclude decode's arithmetic intensity is low enough to stay in the memory-bound side of roofline model.
 
 
 ## references

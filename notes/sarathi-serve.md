@@ -398,6 +398,53 @@ As a result of what we have talked about so far, Sarathi-Serve consistently impr
 
 Unlike benchmarks in some previous papers, Sarathi-Serve specifically measured throughput gains under SLOs, which I found interesting.
 
+## Code Example: nano-vLLM-v1
+
+I found a great minimal example of Chunked Prefill implied to code in https://github.com/slwang-ustc/nano-vllm-v1, a V1 version on top of nano-vllm.
+
+```python
+    def schedule(self) -> tuple[list[Sequence], bool]:
+        # ...
+        token_budget = self.max_num_batched_tokens
+
+        # schedule from the running queue
+        req_index = 0
+        while req_index < len(self.running) and token_budget > 0:
+            seq = self.running[req_index]
+            num_new_tokens = len(seq) - seq.num_cached_tokens
+            if self.enable_chunked:
+                # chunked prefill
+                num_new_tokens = min(num_new_tokens, token_budget)
+            # only allow num_new_tokens + num_cached_tokens
+            # <= max model length - 1 tokens
+            num_new_tokens = min(
+                num_new_tokens, self.max_model_len - 1 - seq.num_cached_tokens
+            )
+            assert num_new_tokens > 0
+            while True:
+                if self.block_manager.can_append(seq, num_new_tokens):
+                    seq.num_new_tokens = num_new_tokens
+                    self.block_manager.may_append(seq)
+                    break
+                preempted_seq = self.running.pop()
+                self.preempt(preempted_seq)
+                # used as flag (if not preempted, we check
+                # for waiting queues as well)
+                preempted_seqs.append(preempted_seq)
+                if len(self.running) == req_index:
+                    break
+            if len(self.running) == req_index:
+                break
+            scheduled_running_seqs.append(seq)
+            token_budget -= seq.num_new_tokens
+            req_index += 1
+```
+
+As seen in the code, instead of checking if the whole `num_new_tokens` for prefill requests,  we also consider the token budget, which is the capacity of maximum tokens that can run in the batch. If the prefill request length is 100 tokens but we only have 20 tokens left before token budget reaches 0, we chunk the first 20 tokens and process it.
+
+
+
+
 ## References
 <ol>
   <li id="reference-1">Agrawal et al., "Taming Throughput-Latency Tradeoff in LLM Inference with Sarathi-Serve." <a href="https://arxiv.org/pdf/2403.02310">Link</a></li>

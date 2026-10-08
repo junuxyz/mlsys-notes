@@ -6,7 +6,7 @@ PP is often used across nodes when one node is not enough to hold or serve a mod
 
 
 <p align="center">
-  <img src="../assets/notes/pp/pp-1.png" width="640" />
+  <img src="../../assets/notes/sarathi-serve/sarathi-serve-06-pipeline-parallelism-overview.png" width="640" />
   <br />
   <sub>Figure 1. Pipeline parallelism splits consecutive layer ranges across four GPUs.<sup><a href="#reference-2">[2]</a></sup></sub>
 </p>

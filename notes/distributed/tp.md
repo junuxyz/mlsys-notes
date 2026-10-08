@@ -15,7 +15,7 @@ Each rank holds different shards of the model weights. These shards are not inde
 The representative case in TP is when it is used on linear layers in Transformer architecture, such as QKV projection in self-attention and gated/up projection in FFN. Megatron-LM popularized two core sharding patterns for linear layers in Transformer blocks: column parallelism and row parallelism.<sup><a href="#reference-1">[1]</a></sup>
 
 <p align="center">
-  <img src="../assets/notes/tp/tp-1.png" width="540" />
+  <img src="../../assets/notes/tp/tp-1.png" width="540" />
   <br />
   <sub>Figure 1. Column parallelism (left) and all-gather communication (right).<sup><a href="#reference-2">[2]</a></sup></sub>
 </p>
@@ -39,7 +39,7 @@ The full output is obtained by **concatenating** these independent slices (see t
 This communication pattern is called **all-gather** ("gathering up") when every rank needs the full concatenated output.<sup><a href="#reference-3">[3]</a></sup>
 
 <p align="center">
-  <img src="../assets/notes/tp/tp-2.png" width="540" />
+  <img src="../../assets/notes/tp/tp-2.png" width="540" />
   <br />
   <sub>Figure 2. Row parallelism and all-reduce communication.<sup><a href="#reference-2">[2]</a></sup></sub>
 </p>
@@ -94,7 +94,7 @@ You can see that both attention and FFN follow the same useful pattern:
 Because the intermediate activations are consumed while still sharded, we do not need an all-gather immediately after the column-parallel layer. Instead, the row-parallel layer finishes the block with an all-reduce.
 
 <p align="center">
-  <img src="../assets/notes/tp/tp-3.png" width="540" />
+  <img src="../../assets/notes/tp/tp-3.png" width="540" />
   <br />
   <sub>Figure 3. Column-wise projection followed by row-wise projection. This skips unnecessary All-Gather communication.<sup><a href="#reference-2">[2]</a></sup></sub>
 </p>
