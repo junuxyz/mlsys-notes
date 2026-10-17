@@ -231,7 +231,7 @@ The same kind of optimization can be applied during value aggregation, where we 
 
 Each head's output before the final projection $W^O$ can be expressed as:
 
-$$o_i = a_i V_i = a_i(C W_i^{UV}) = (a_i C)W_i^{UV} \\ \\ \text{where } a_i = \operatorname{softmax}(S_i).$$
+$$o_i = a_i V_i = a_i(C W_i^{UV}) = (a_i C)W_i^{UV} \\ \\ \text{where } a_i = \mathrm{softmax}(S_i).$$
 
 Again, by associativity, there are two ways to get the same output.
 
@@ -256,7 +256,7 @@ The cost per head, excluding the common final output projection, is:
 
 In both paths, we concatenate the $[1 \times 128]$ head outputs and apply the same output projection:
 
-$$O = \operatorname{Concat}(o_0,\ldots,o_{n_h-1})W^O$$
+$$O = \mathrm{Concat}(o_0,\ldots,o_{n_h-1})W^O$$
 
 ## 3. Decoupled RoPE (Rotary Positional Embedding)
 
