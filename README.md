@@ -12,6 +12,10 @@ Currently focusing on LLM serving system and inference optimization.
 - [Rejection Sampling in Speculative Decoding](notes/speculative-decoding-rejection-sampling.md)
 - [Triton Notes](https://junupark.xyz/triton-notes/)
 
+### Transformer
+
+- [MLA (Multi-Head Latent Attention) Explained](notes/transformer/mla.md)
+
 ### Inference Engine
 - [tinyorca deep dive](notes/tinyorca.md)
 - [Inside nano-vLLM](notes/vllm/inside-nano-vllm.md)
