@@ -181,8 +181,8 @@ $$S_i = \frac{q_i K_i^\top}{\sqrt{d_k}} = \frac{q_i \left(C W^{UK}_i\right)^\top
 
 We can break this down into two steps:
 
-1. Projected $K_i$: $K_i = C\, W^{UK}_i$: $[T \times 512]\,[512 \times 128] = [T \times 128]$, costing $131{,}072\,T$
-2. Attention score: $S_i = q_i\, K_i^\top$: $[1 \times 128]\,[128 \times T] = [1 \times T]$, costing $256\,T$
+1. Projected $K_i$: $K_i = C W^{UK}_i$: $[T \times 512] [512 \times 128] = [T \times 128]$, costing $131{,}072 T$
+2. Attention score: $S_i = q_i K_i^\top$: $[1 \times 128] [128 \times T] = [1 \times T]$, costing $256 T$
 
 We can see where the cost comes from. Attention score computation is relatively cheap, but to get there we push **every row of the cache** through $W^{UK}_i$, and we do this again for every decoding step. The longer the context ($T$) gets, the worse it becomes.
 
@@ -199,7 +199,7 @@ Let's come back to the attention score equation.
 
 $$S_i = \frac{q_i K_i^\top}{\sqrt{d_k}} = \frac{q_i \left(C W^{UK}_i\right)^\top}{\sqrt{d_k}}$$
 
-What we did above was to do $K_i = C\, W^{UK}_i$ first (in the parentheses) and then do matrix multiplication with $q_i$. However, since matrix multiplication is **[associative](https://en.wikipedia.org/wiki/Matrix_multiplication)**, we are free to choose which product to compute first.
+What we did above was to do $K_i = C W^{UK}_i$ first (in the parentheses) and then do matrix multiplication with $q_i$. However, since matrix multiplication is **[associative](https://en.wikipedia.org/wiki/Matrix_multiplication)**, we are free to choose which product to compute first.
 
 Using the transpose rule $(AB)^T = B^TA^T$, we can reverse the order of the matrices inside the transpose as:
 
@@ -209,17 +209,17 @@ Then, by the associative property of matrix multiplication, we can compute ($q_i
 
 So instead of applying $W^{UK}_i$ to all $T$ rows of the cache $C$, we can apply it **once to the query**:
 
-1. Absorbed query $\tilde{q}_i = q_i\, W^{UK\top}_i$: $[1 \times 128]\,[128 \times 512] = [1 \times 512]$. This costs $131{,}072$, **independent of $T$.**
-2. Attention score $\text{scores}_i = \tilde{q}_i\, C^\top$: $[1 \times 512]\,[512 \times T] = [1 \times T]$. This costs $1{,}024\,T$.
+1. Absorbed query $\tilde{q}_i = q_i W^{UK\top}_i$: $[1 \times 128] [128 \times 512] = [1 \times 512]$. This costs $131{,}072$, **independent of $T$.**
+2. Attention score $\text{scores}_i = \tilde{q}_i C^\top$: $[1 \times 512] [512 \times T] = [1 \times T]$. This costs $1{,}024 T$.
 
 Interestingly, while the result is mathematically identical, the cost of compute is very different:
 
 |                      | FLOPs                    |
 | -------------------- | ------------------------ |
-| Naive (Non-absorbed) | $131{,}328\,T$           |
-| Absorbed             | $131{,}072 + 1{,}024\,T$ |
+| Naive (Non-absorbed) | $131{,}328 T$           |
+| Absorbed             | $131{,}072 + 1{,}024 T$ |
 
-Absorption reduces the $T$-dependent cost from $131{,}328\,T$ to $1{,}024\,T$, while adding $131{,}072$ FLOPs to transform the query. For integer $T \ge 2$, this uses fewer FLOPs than naive reconstruction and avoids materializing $K_i$ during decode.
+Absorption reduces the $T$-dependent cost from $131{,}328 T$ to $1{,}024 T$, while adding $131{,}072$ FLOPs to transform the query. For integer $T \ge 2$, this uses fewer FLOPs than naive reconstruction and avoids materializing $K_i$ during decode.
 
 <p align="center">
   <img src="../../assets/notes/mla/mla-5.png" width="800" alt="Weight absorption computes attention from the cached latent without reconstructing full keys and values." style="max-width: 100%; height: auto;" />
@@ -251,8 +251,8 @@ The cost per head, excluding the common final output projection, is:
 
 | | FLOPs |
 | --- | --- |
-| Naive (Non-absorbed) | $131{,}328\,T$ |
-| Absorbed | $1{,}024\,T + 131{,}072$ |
+| Naive (Non-absorbed) | $131{,}328 T$ |
+| Absorbed | $1{,}024 T + 131{,}072$ |
 
 In both paths, we concatenate the $[1 \times 128]$ head outputs and apply the same output projection:
 
@@ -274,17 +274,17 @@ where
 
 Let $s$ be the query position and $t$ the key position. The score becomes:
 
-$$(q R(s))(k R(t))^{\top} = q\, R(s-t)\, k^{\top}$$
+$$(q R(s))(k R(t))^{\top} = q R(s-t) k^{\top}$$
 
 Now let's put this into MLA. Without RoPE, the score against token $t$ is what we saw in weight absorption:
 
-$$\text{score}_i(s,t) \text{ (without RoPE)} = \big(q_i(s)\, W^{UK\top}_i\big)\, c_t^{\top}$$
+$$\text{score}_i(s,t) \text{ (without RoPE)} = \big(q_i(s) W^{UK\top}_i\big) c_t^{\top}$$
 
 Applying RoPE, the rotated key of token $t$ is $k_i(t) = c_t W^{UK}_i R(t)$, so $R(s-t)$ lands right in the middle:
 
-$$\text{score}_i(s,t) \text{ (with RoPE)} = \big(q_i(s)\, R(s-t)\, W^{UK\top}_i\big)\, c_t^{\top}$$
+$$\text{score}_i(s,t) \text{ (with RoPE)} = \big(q_i(s) R(s-t) W^{UK\top}_i\big) c_t^{\top}$$
 
-As seen in the equation, if we apply RoPE, the absorbed query $\tilde{q}_i(s,t) = q_i(s)\, R(s-t)\, W^{UK\top}_i$ contains $R(s-t)$ in the middle which **differs** for each past token. So, while keeping only the latent cache, we need a **separate $\tilde{q}_i(s,t)$ per token**: the same $[1 \times 128] \times [128 \times 512]$ product **$T$ times**.
+As seen in the equation, if we apply RoPE, the absorbed query $\tilde{q}_i(s,t) = q_i(s) R(s-t) W^{UK\top}_i$ contains $R(s-t)$ in the middle which **differs** for each past token. So, while keeping only the latent cache, we need a **separate $\tilde{q}_i(s,t)$ per token**: the same $[1 \times 128] \times [128 \times 512]$ product **$T$ times**.
 
 <p align="center">
   <img src="../../assets/notes/mla/mla-6.png" width="760" alt="Applying RoPE to the full key makes the absorbed query depend on each key position." style="max-width: 100%; height: auto;" />
@@ -303,18 +303,18 @@ Each query and key is split into:
 
 Looking at just the RoPE part: the query side projects the compressed query $c^Q$ $[1 \times 1536]$ with $W^{QR}_i$ $[1536 \times 64]$, one per head, so $128 \times [1536 \times 64]$ in total. The key side projects the raw hidden state $X$ $[1 \times 5120]$ with $W^{KR}$ $[5120 \times 64]$. Unlike $W^{QR}$, $W^{KR}$ is **shared across all heads**, so we only cache one 64-dim RoPE key per token.
 
-$$q^R_i = \text{RoPE}\big(c^Q\, W^{QR}_i\big), \qquad k^R = \text{RoPE}\big(X\, W^{KR}\big)$$
+$$q^R_i = \text{RoPE}\big(c^Q W^{QR}_i\big), \qquad k^R = \text{RoPE}\big(X W^{KR}\big)$$
 
 The score is now the sum of the two parts:
 
-$$\text{score}_i(s,t) = \big(q_i(s)\, W^{UK\top}_i\big)\, c_t^\top + q^R_i(s)\, (k_t^R)^\top$$
+$$\text{score}_i(s,t) = \big(q_i(s) W^{UK\top}_i\big) c_t^\top + q^R_i(s) (k_t^R)^\top$$
 
 Since the first term involves no rotation, weight absorption works exactly as before. In code, the content components of the query and key are often labeled `nope`, short for “no positional embedding,” because RoPE is not applied to them.
 
 The second term has the rotation, but $k^R$ never goes through $c$ or $W^{UK}$, so we can cache it already rotated and use it directly. In total, the cache holds $512 + 64 = 576$ elements per token.
 
 > [!NOTE]
-> Value-side absorption $(a_i C)\, W^{UV}_i$ is unaffected since RoPE only applies to Q and K. So QK reads all 576 elements per token, while AV only needs the 512 of $c$.
+> Value-side absorption $(a_i C) W^{UV}_i$ is unaffected since RoPE only applies to Q and K. So QK reads all 576 elements per token, while AV only needs the 512 of $c$.
 
 For the same query-head count, per-head dimension, and cache dtype, the KV cache sizes per token per layer are:
 
