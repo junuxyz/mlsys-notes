@@ -1,0 +1,200 @@
+{
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "cuda": "12.8",
+  "q_lens": [
+    1,
+    4096
+  ],
+  "kv_len": 4096,
+  "methods": [
+    "standard",
+    "unmerged_absorb",
+    "merged_absorb"
+  ],
+  "repeats": 5,
+  "dtype": "bf16",
+  "causal": true,
+  "scope": "h_to_output",
+  "samples": [
+    {
+      "q_len": 1,
+      "method": "standard",
+      "trial": 1,
+      "time_us": 903.1999707221985
+    },
+    {
+      "q_len": 1,
+      "method": "unmerged_absorb",
+      "trial": 1,
+      "time_us": 335.7439935207367
+    },
+    {
+      "q_len": 1,
+      "method": "merged_absorb",
+      "trial": 1,
+      "time_us": 449.6319890022278
+    },
+    {
+      "q_len": 1,
+      "method": "standard",
+      "trial": 2,
+      "time_us": 858.3040237426758
+    },
+    {
+      "q_len": 1,
+      "method": "unmerged_absorb",
+      "trial": 2,
+      "time_us": 298.8480031490326
+    },
+    {
+      "q_len": 1,
+      "method": "merged_absorb",
+      "trial": 2,
+      "time_us": 448.9920139312744
+    },
+    {
+      "q_len": 1,
+      "method": "standard",
+      "trial": 3,
+      "time_us": 870.1760172843933
+    },
+    {
+      "q_len": 1,
+      "method": "unmerged_absorb",
+      "trial": 3,
+      "time_us": 282.27201104164124
+    },
+    {
+      "q_len": 1,
+      "method": "merged_absorb",
+      "trial": 3,
+      "time_us": 435.4560077190399
+    },
+    {
+      "q_len": 1,
+      "method": "standard",
+      "trial": 4,
+      "time_us": 872.0319867134094
+    },
+    {
+      "q_len": 1,
+      "method": "unmerged_absorb",
+      "trial": 4,
+      "time_us": 296.2239980697632
+    },
+    {
+      "q_len": 1,
+      "method": "merged_absorb",
+      "trial": 4,
+      "time_us": 436.8639886379242
+    },
+    {
+      "q_len": 1,
+      "method": "standard",
+      "trial": 5,
+      "time_us": 860.8959913253784
+    },
+    {
+      "q_len": 1,
+      "method": "unmerged_absorb",
+      "trial": 5,
+      "time_us": 290.0480031967163
+    },
+    {
+      "q_len": 1,
+      "method": "merged_absorb",
+      "trial": 5,
+      "time_us": 454.0480077266693
+    },
+    {
+      "q_len": 4096,
+      "method": "standard",
+      "trial": 1,
+      "time_us": 3347.775936126709
+    },
+    {
+      "q_len": 4096,
+      "method": "unmerged_absorb",
+      "trial": 1,
+      "time_us": 7641.471862792969
+    },
+    {
+      "q_len": 4096,
+      "method": "merged_absorb",
+      "trial": 1,
+      "time_us": 9623.488426208496
+    },
+    {
+      "q_len": 4096,
+      "method": "standard",
+      "trial": 2,
+      "time_us": 3263.6799812316895
+    },
+    {
+      "q_len": 4096,
+      "method": "unmerged_absorb",
+      "trial": 2,
+      "time_us": 7490.208148956299
+    },
+    {
+      "q_len": 4096,
+      "method": "merged_absorb",
+      "trial": 2,
+      "time_us": 9468.28842163086
+    },
+    {
+      "q_len": 4096,
+      "method": "standard",
+      "trial": 3,
+      "time_us": 3249.376058578491
+    },
+    {
+      "q_len": 4096,
+      "method": "unmerged_absorb",
+      "trial": 3,
+      "time_us": 7449.056148529053
+    },
+    {
+      "q_len": 4096,
+      "method": "merged_absorb",
+      "trial": 3,
+      "time_us": 9426.495552062988
+    },
+    {
+      "q_len": 4096,
+      "method": "standard",
+      "trial": 4,
+      "time_us": 3186.6559982299805
+    },
+    {
+      "q_len": 4096,
+      "method": "unmerged_absorb",
+      "trial": 4,
+      "time_us": 7320.864200592041
+    },
+    {
+      "q_len": 4096,
+      "method": "merged_absorb",
+      "trial": 4,
+      "time_us": 9307.93571472168
+    },
+    {
+      "q_len": 4096,
+      "method": "standard",
+      "trial": 5,
+      "time_us": 3215.3279781341553
+    },
+    {
+      "q_len": 4096,
+      "method": "unmerged_absorb",
+      "trial": 5,
+      "time_us": 7385.951995849609
+    },
+    {
+      "q_len": 4096,
+      "method": "merged_absorb",
+      "trial": 5,
+      "time_us": 9342.752456665039
+    }
+  ]
+}
