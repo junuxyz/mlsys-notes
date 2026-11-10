@@ -18,7 +18,8 @@ Currently focusing on LLM serving system and inference optimization.
 
 ### Inference Engine
 - [tinyorca deep dive](notes/tinyorca.md)
-- [Inside nano-vLLM](notes/vllm/inside-nano-vllm.md)
+- [Inside nano-vLLM](notes/inference-engine/inside-nano-vllm.md)
+- [Inside nano-vLLM v1](notes/inference-engine/inside-nano-vllm-v1.md)
 - [How Multiprocess Serving Works in vLLM](notes/vllm/how-mp-serving-works-in-vllm.md)
 - [Comparing Round-Robin Routing vs KV-Aware Routing on Nemotron-3-Nano](https://github.com/Prasannajaga/deployment-guide/blob/main/blogs/rr-vs-kv-aware-routing.md)
 

@@ -8,29 +8,29 @@ In this note, we will go over how the following work in vLLM:
 We will do so by going through the [nano-vllm-v1](https://github.com/slwang-ustc/nano-vllm-v1) implementation by https://github.com/slwang-ustc.
 
 >[!note]
-> Chunked prefill has also been applied to nano-vllm since April 2026.
+> I've later found that chunked prefill has also been applied to nano-vllm since April 2026, but we'll explain about it in this post.
 
 Since most changes are contained in the Scheduler, Block Manager, and Model Runner, it will be pretty easy to understand the difference if you're already familiar with the V0 architecture.
 
 ## Chunked Prefill Recap
 
-I have already explained the paper that introduced _Chunked Prefill_, so I am only going to write a TLDR on what it is before we dive into the code. For people who want to understand more about it, check my note on [Sarathi-Serve](https://github.com/junuxyz/mlsys-notes/blob/main/notes/sarathi-serve.md); the [**illustrated walkthrough**](https://github.com/junuxyz/mlsys-notes/blob/main/notes/sarathi-serve.md#stall-free-batching-w-illustrated-example) in particular will help you understand how this works.
+I have already explained the paper that introduced _Chunked Prefill_, so I am only going to write a TLDR on what it is before we dive into the code. For people who want to understand more about it, check my note on [Sarathi-Serve](https://github.com/junuxyz/mlsys-notes/blob/main/notes/sarathi-serve.md) where the [**illustrated walkthrough**](https://github.com/junuxyz/mlsys-notes/blob/main/notes/sarathi-serve.md#stall-free-batching-w-illustrated-example) in particular will help you understand how this works.
 
 **TLDR of Chunked Prefill**
 
-**Chunked Prefill** is a technique proposed in Sarathi-Serve where, instead of scheduling a prefill request at once, we set a token budget and may chunk part of the prefill request if it doesn't fit into the token budget.
+**Chunked Prefill** is a technique proposed in Sarathi-Serve where, instead of scheduling a prefill sequence at once, we set a token budget and may chunk part of the prefill sequence if it doesn't fit into the token budget.
 
-For a minimal example, say the token budget is 100 tokens, there are 5 running requests in decode, and a prefill request with a length of 1,000 tokens is waiting.
+For a minimal example, say the token budget is 100 tokens, there are 5 running sequences in decode, and a prefill sequence with a length of 1,000 tokens is waiting.
 
 Now how do we schedule this?
 
-We first prioritize the 5 tokens in their decoding stage. The token budget becomes 100 - 5 = 95. We have 95 additional tokens to append, so instead of appending all the tokens in the prefill request, we chunk the first 95 tokens and run the iteration. The prefill request has 905 tokens left, and the rest will be scheduled (chunked again) in later steps.
+We first prioritize the 5 tokens in their decoding stage. The token budget becomes 100 - 5 = 95. We have 95 additional tokens to append, so instead of appending all the tokens in the prefill sequence, we chunk the first 95 tokens and run the iteration. The prefill sequence has 905 tokens left, and the rest will be scheduled (possibly chunked again) in later steps.
 
 **Why do we do this?**
 
-If we prioritize decode, prefill requests get stalled and TTFT (Time-To-First-Token) increases. Also, batching only decode requests will underutilize the GPU's compute. If we prioritize prefill, decode requests get stalled and TPOT (Time-Per-Output-Token) increases. Even worse, the worst 5% case (p95) or 1% case (p99) becomes so significantly high that users experience massive stalls where token streaming stops in the middle of generation for a long time (10s–30s).
+If we prioritize decode, prefill sequences get stalled and TTFT (Time-To-First-Token) increases. Also, batching only decode sequences will underutilize the GPU's compute. On the other hand, if we prioritize prefill, decode sequences get stalled and TPOT (Time-Per-Output-Token) increases. Even worse, the worst 5% case (p95) or 1% case (p99) becomes so significantly high that users experience massive stalls where token streaming stops in the middle of generation for a long time (10s–30s).
 
-The takeaway is that prioritizing either one (prefill or decode) results in suboptimal throughput or increased latency. In order to avoid this and schedule even more cleverly, we set a token budget, which softly guarantees the avoidance of significant latency (SLO constraints) while utilizing the GPU better than a decode-first approach.
+The takeaway is that prioritizing either one (prefill or decode) results in suboptimal throughput or increased latency. This is because prefill and decode have very different computational characteristics and interfere each other. In order to avoid this and schedule even more cleverly, we set a token budget, which softly guarantees the avoidance of significant latency (SLO constraints) while utilizing the GPU better than a decode-first approach.
 
 Now let's look at how this idea is implemented in nano-vllm-v1.
 
@@ -58,20 +58,20 @@ def step(self):
 ```
 
 LLMEngine's `step` function works as follows:
-1. schedules sequences (prefill and decode requests **can be mixed**; more explained in the second section)
+1. schedules sequences (unlike the V0 architecture (nano-vllm) prefill and decode sequences **can be mixed**! More explained in the second section)
 2. model runner runs the forward pass
 3. scheduler updates the batch information using postprocess
 
 How does the scheduler in step 1 work?
 ### v1 scheduler
 
-In the original nano-vllm scheduler, it processed all given prefill requests first, then processed decode requests, and didn't allow mixed batching. Let's look at how V1 works.
+If we look back at the original nano-vllm scheduler, it processed all given prefill sequences first, then processed decode sequences, and didn't allow mixed batching. Let's look at how V1 works.
 
 **TLDR on how V1 scheduler works:**
-1. check the running queue first: requests that have started processing and have passed through at least one (chunked) prefill pass, consisting of either sequences undergoing chunked prefill or decode requests
-2. schedule tokens while considering chunked prefill, if enabled, and check the prefix cache as well
-3. whenever a new sequence is scheduled to run in that step, reduce the token budget, which is the maximum number of tokens that can be batched in that step
-4. if the scheduler has not finished scheduling all the sequences in the running queue but no free blocks remain, preempt sequences
+1. check the running queue first, where sequences that have started processing. These are sequences that are either during their prefill phase (if there are any tokens remaining after chunking) or decode phase.
+2. schedule tokens while considering chunked prefill - we can pass already processed chunks.
+3. whenever a new sequence is scheduled to run in that step, reduce the "token budget", which is the maximum number of tokens that can be batched in that step.
+4. if the scheduler has not finished scheduling all the sequences in the running queue but no free blocks remain, preempt sequences.
 
 Below is the full code for the schedule function:
 
@@ -152,9 +152,8 @@ def schedule(self) -> tuple[list[Sequence], bool]:
 - `scheduled_seqs` is the list of all sequences scheduled for this step's forward pass.
 - `scheduled_running_seqs` is the list of sequences in the running queue scheduled for this step's forward pass.
 - `scheduled_new_reqs` is the list of sequences in the waiting queue that are newly appended to the running queue and this step's forward pass. We can only try to schedule sequences from the waiting queue if we have a "token budget" left even after scheduling all the sequences in the running queue.
-- `preempted_seqs` is the list of sequences that get preempted due to a lack of KV Cache memory. While this is a list type, it is only used as a flag indicating whether to try appending sequences from waiting requests.
-- `token_budget` is the limit on the number of tokens we can append/batch in this step.
-
+- `preempted_seqs` is the list of sequences that get preempted due to a lack of KV Cache memory. While this is a list type, it is only used as a flag indicating whether to try appending sequences from waiting sequences.
+- `token_budget` is the limit on the number of tokens we can append/batch in this step. This indirectly determines the batch size of each iteration (bigger the token budget, we would expect bigger batch size).
 
 ```python
 	# schedule from the running queue
@@ -170,20 +169,23 @@ def schedule(self) -> tuple[list[Sequence], bool]:
 		assert num_new_tokens > 0
 ```
 
-While we haven't run all the requests in the running queue AND there is a token budget left, `num_new_tokens`, which represents the new tokens that will be appended to the batch, is the total number of tokens in that sequence minus the cached tokens.
+While we haven't run all the sequences in the running queue AND there is a token budget left, that's the capacity of new tokens we can add (`num_new_tokens`).
 
-> [!NOTE]  
-> I've noticed the while loop (`while ... token_budget > 0:`) terminates as soon as the token budget reaches zero, even if it has not examined every request in the running queue. This behavior is also explicitly acknowledged in a comment in [vLLM’s scheduler source code](https://github.com/vllm-project/vllm/blob/318b527cc2d1f672683407be05ea26a2cf1f3ea6/vllm/v1/core/sched/scheduler.py#L1058-L1065).
-> 
-> Consequently, a request in the decode stage may, in principle, remain unscheduled for a step if earlier chunked-prefill requests exhaust the token budget. For example, assume a token budget of 4 and the running queue `[P1, D1, P2, D2]`, where `P` is an in-progress chunked prefill and `D` is a decode request. If the scheduler assigns 2 tokens to `P1`, 1 to `D1`, and the remaining 1 to `P2`, the budget reaches zero (4-2-1-1) before `D2` is examined. Thus, `D2` cannot be scheduled in that step. I am pretty sure this (very niche case) doesn't become an actual problem for tail latency (e.g. p99), though.
+> [!NOTE]
+> I've noticed the while loop (`while ... token_budget > 0:`) terminates as soon as the token budget reaches zero, even if it has not examined every sequence in the running queue. This behavior is also explicitly acknowledged in a comment in [vLLM’s scheduler source code](https://github.com/vllm-project/vllm/blob/318b527cc2d1f672683407be05ea26a2cf1f3ea6/vllm/v1/core/sched/scheduler.py#L1058-L1065). Consequently, a sequence in the decode stage may, in principle, remain unscheduled for a step if earlier chunked-prefill sequences exhaust the token budget.
+>
+> For example, assume a token budget of 4 and the running queue `[P1, D1, P2, D2]`, where `P` is an in-progress chunked prefill and `D` is a decode sequence. If the scheduler assigns 2 tokens to `P1`, 1 to `D1`, and the remaining 1 to `P2`, the budget reaches zero (4-2-1-1) before `D2` is examined. Thus, `D2` cannot be scheduled in that step. I am pretty sure this (very niche case) doesn't become an actual problem for tail latency (e.g. p99), though.
 
-Here, _"cached token"_ refers not only to the prefix cache blocks but also to previous KV Cache tokens generated in earlier steps. So, for a prefill request, `num_cached_tokens` would be prefix-cached tokens, and for a decode sequence, it would be the prefill tokens of that sequence + its previous decode steps.
+Here, _"cached token"_ refers not only to the prefix cache blocks but also to previous KV Cache tokens generated in earlier steps.
+- For prefill sequence: `num_cached_tokens` would be prefix-cached tokens
+- for a decode sequence: it would be the prefill tokens of that sequence + its previous decode steps.
 
 If `enable_chunked` is True, `num_new_tokens` is capped at `min(num_new_tokens, token_budget)`, since we cannot exceed the token budget as explained above.
 
 Finally, there is the `max_model_len` limit, which is the maximum number of tokens a sequence can have. When limiting in terms of `max_model_len`, we subtract `1 + seq.num_cached_tokens`: 1 for sampling the last token and `seq.num_cached_tokens` because `max_model_len` should include cached tokens as well.
 
 After this process, we can get the exact number of tokens to append from that specific sequence (recall that we are still in the while loop:
+
 ```python
 while req_index < len(self.running) and token_budget > 0:
 	seq = self.running[req_index]
@@ -220,7 +222,7 @@ The Scheduler asks the Block Manager if it can append the `num_new_tokens` of th
 The last computed block capacity is the leftover unused memory space in the last block. The Block Manager checks how many new blocks are needed, considering the last computed block capacity (`num_new_tokens - last_computed_block_capacity + self.block_size - 1) // self.block_size`), and checks that this does not exceed the number of free blocks we have. For example, if there is only one new token to append for the sequence, the block size is 4, and only 3 slots were used before:
 
 ```
-(1 - (4-3) + 4 -1) // 4 = 3 // 4 = 0.
+(1 - (4-3) + 4 -1) // 4 = 3 // 4 = 0
 ```
 	
 If it can append the blocks, it actually appends them with `may_append`.
@@ -267,7 +269,7 @@ If the previous block is not full, the Block Manager uses the last block. If the
 
 This function is called _"may"_ append because it allocates a physical block only when the last physical block is full (`last_block_len == block_size`) and appends to the last physical block if it isn't.
 
-It is responsible for allocating KV Cache blocks for _new_ tokens while respecting already-cached blocks (from prefix cache or previous steps). This logic is critical for chunked prefill because we often only process a portion of a long prefill request in one step.
+It is responsible for allocating KV Cache blocks for _new_ tokens while respecting already-cached blocks (from prefix cache or previous steps). This logic is critical for chunked prefill because we often only process a portion of a long prefill sequence in one step.
 
 ```python
                 preempted_seq = self.running.pop()
@@ -282,12 +284,12 @@ It is responsible for allocating KV Cache blocks for _new_ tokens while respecti
             req_index += 1
 ```
 
-If there are sequences left in the running queue but no blocks are available for a sequence, the remaining requests are preempted starting from the last index (`pop()`). As explained in my prior note, preemption frees the preempted sequence's blocks, which can be allocated to the prior running sequences.
+If there are sequences left in the running queue but no blocks are available for a sequence, the remaining sequences are preempted starting from the last index (`pop()`). As explained in my prior note, preemption frees the preempted sequence's blocks, which can be allocated to the prior running sequences.
 
 So the whole loop can be summarized as:
-1. for each running request in the running queue, try to append the blocks needed for each sequence
+1. for each running sequence in the running queue, try to append the blocks needed for each sequence
 2. if the required blocks are not available, preempt the last sequence from the running queue (lowest priority in FCFS scheduling)
-3. continue until all requests are either scheduled or preempted.
+3. continue until all sequences are either scheduled or preempted.
 
 Now we look at the second half.
 
@@ -316,13 +318,20 @@ Now we look at the second half.
 			scheduled_new_reqs.append(seq)
 ```
 
-This path is only taken when there are no preempted sequences, since any preemptions would mean there was not enough memory to run the sequences in the running queue. All sequences in the waiting queue are waiting for their first (chunked) prefill. We first get the new tokens in the used block list, the new tokens in the free block list, and the number of new tokens. Here, `num_new_computed_tokens_in_used` refers to tokens that have the same prefix and are used in the running queue, while `num_new_computed_tokens_in_free` refers to tokens that have the same prefix and have been freed but not yet overwritten. This is possible because a sequence's KV Cache is not erased when it is freed; it remains available until it is overwritten.
+This path is only taken when there are no preempted sequences, since any preemptions would mean there was not enough memory to run the sequences in the running queue (we'll talk about preemption in more detail later).
 
-Sequences that don't exceed the available KV block memory and token budget for that step are appended to the running queue and scheduled.
+All sequences in the waiting queue are waiting for their first (chunked) prefill. We first get the new tokens we can append based on the remaining token budget. Here, `num_new_computed_tokens_in_used` refers to tokens that have the same prefix and are used in the running queue, while `num_new_computed_tokens_in_free` refers to tokens that have the same prefix and have been freed but not yet overwritten. This is possible because a sequence's KV Cache is not erased when it is freed but it remains available until it is overwritten, also known as _Copy-on-Write mechanism_.
+
+![KV cache block sharing](../../Pasted%20image%2020261031111005.png)
+Figure. https://vllm.ai/blog/2023-06-20-vllm
+
+Sequences that don't exceed the available KV block memory and token budget for that step are appended to the running queue and scheduled, in order.
 
 > [!NOTE]
-> It is important to know that BlockManager only assigns/frees sequences at the granularity of a _block_. Everything is assigned in blocks, not individual tokens. The actual token-level mapping is done by slot mapping, which happens in the Model Runner.
+> We've already talked about this in KV Cache in practice in inside nano-vllm, but I'll explain one more time: it is important to know that BlockManager only assigns/frees sequences at the granularity of a **_block_**. Everything is assigned in blocks, not individual tokens. The actual token-level mapping is done by slot mapping, which happens in the Model Runner.
 > While some functions in BlockManager seem to return token-level values, e.g., `self.block_manager.get_token_layout(seq)`, this is done to match the convention in the Scheduler, which works at token granularity; internally, the tokens are always managed as multiples of the block size.
+
+So overall, the scheduler is quite straight forward! - First try appending every sequences into the running queue. If token budget allows, we append new sequences from waiting queue and schedule them as well. Now we will look at what happens when model runner
 
 ### model runner v1
 
@@ -334,14 +343,16 @@ Unlike `nano-vllm`, which used separate `prepare_prefill()` and `prepare_decode(
 prepare_model_input(seqs)
 ```
 
-The function does not fundamentally care whether a request is in prefill or decode. For every sequence, it only asks:
+The function doesn't really care whether a sequence is in prefill or decode. It only asks:
 
-```text
-How many tokens are already cached?
-How many new tokens should be computed now?
-```
+- How many tokens are already cached?
+- How many new tokens should be computed now?
 
-It then packs all new tokens into one flat batch.
+Then it packs all new tokens into one flat batch.
+
+> [!NOTE]
+> nano-vllm-v1 uses `flash_attn_varlen_func` which is FlashAttention's variable-length attention function to process prefill and decode sequences in the same batch.
+> Ultimately what the Model Runner in inference engine does is: pack new token together while building the metadata for the kernel.
 
 **Full code**
 
@@ -420,17 +431,18 @@ How do `seqlen_q` and `seqlen_k` differ?
 If a token is cached (either because of previous prefill/chunked prefill or prefix caching), we don't need to use the previous Q for it since we already have that previous token's KV cache. However, we always need to load all previous KV cache entries in order to get the attention scores for the query tokens.
 
 Therefore:
+
 ```
 seqlen_q = seq.num_new_tokens
 seqlen_k = seq.num_context_tokens
 ```
 
 
-For example, `seqlen_q` for decoding tokens will be 1, while `seqlen_k` is the length of all previous tokens.
+For example, `seqlen_q` for decoding tokens will be 1, while `seqlen_k` is the length of all previous tokens of the sequence.
 
 **What is the result of the function?**
 
-It stores eight metadata fields in the global batch `Context` (also check the `Context` section in my previous note):
+It stores eight metadata fields in the global batch `Context` (also check the `Context` section in my [previous note](inside-nano-vllm.md)):
 
 - `cu_seqlens_q`: cumulative sequence length of query tokens
 - `cu_seqlens_k`: cumulative sequence length of key/value tokens
@@ -504,17 +516,17 @@ If there is at least one sequence that has cached tokens (`seq.num_cached_tokens
 
 While I tried to explain things simply, it might be a bit abstract to look only at the steps, so let's walk through an illustrative example.
 
-Assume a block size of 4 tokens, with three requests, A, B, and C, scheduled together:
+Assume a block size of 4 tokens, with three sequences, A, B, and C, scheduled together:
 - A(`[11, 12, 13, 14, 15, 16]`) is in its decoding stage.
 - B(`[21, 22, 23, 24, 25, 26, 27, 28, 29, 30]`) is processing a chunk of a longer prompt and has a cached prefix, where the first four tokens are cached and the next 3 tokens are about to be processed due to the limited token budget.
 - C(`[31, 32, 33, 34]`) is performing a fresh prefill and finishes its prompt in this iteration.
 
-**Request A: decode**
+**Sequence A: decode**
 
 <p align="center">
   <img src="../../assets/notes/inside-nano-vllm-v1/inside-nano-vllm-v1-1.png" width="540" />
   <br />
-  <sub>Figure 1. Request A computes one new decode token after six cached tokens.</sub>
+  <sub>Figure 1. Sequence A computes one new decode token after six cached tokens.</sub>
 </p>
 
 The first six tokens have already been processed. Token `17` (orange), at logical position 6, will be newly computed in this step.
@@ -528,22 +540,22 @@ input_ids = A[6:7] = [17]
 positions   = [6]
 ```
 
-**Request B: chunked prefill with a cached prefix**
+**Sequence B: chunked prefill with a cached prefix**
 
 <p align="center">
   <img src="../../assets/notes/inside-nano-vllm-v1/inside-nano-vllm-v1-2.png" width="600" />
   <br />
-  <sub>Figure 2. Request B computes a three-token prefill chunk after a four-token cached prefix.</sub>
+  <sub>Figure 2. Sequence B computes a three-token prefill chunk after a four-token cached prefix.</sub>
 </p>
 
 The prompt still contains positions 7–9, so B does not finish its prompt in this iteration.
 
-**Request C: fresh prefill**
+**Sequence C: fresh prefill**
 
 <p align="center">
   <img src="../../assets/notes/inside-nano-vllm-v1/inside-nano-vllm-v1-3.png" width="420" />
   <br />
-  <sub>Figure 3. Request C performs a fresh four-token prefill in one physical block.</sub>
+  <sub>Figure 3. Sequence C performs a fresh four-token prefill in one physical block.</sub>
 </p>
 
 ```text
@@ -558,14 +570,14 @@ block_table = [3]
 
 1. Check if this sequence needs to compute logits
 
-Since the `num_context_len` values for requests A and C are the same as their sequence lengths, these sequences need to compute logits. However, for B, the sequence length is 10 but `num_context_len` is 7, so we don't need to compute logits for it. We only append requests A and C.
+Since the `num_context_len` values for sequences A and C are the same as their sequence lengths, these sequences need to compute logits. However, for B, the sequence length is 10 but `num_context_len` is 7, so we don't need to compute logits for it. We only append sequences A and C.
 
 2. Pack input IDs and positions
 
 <p align="center">
   <img src="../../assets/notes/inside-nano-vllm-v1/inside-nano-vllm-v1-4.png" width="680" />
   <br />
-  <sub>Figure 4. The model runner packs the new tokens from requests A, B, and C into one flat batch.</sub>
+  <sub>Figure 4. The model runner packs the new tokens from sequences A, B, and C into one flat batch.</sub>
 </p>
 
 This becomes the output of the function.
@@ -632,7 +644,7 @@ if cu_seqlens_k[-1] > cu_seqlens_q[-1]:
     block_tables = self.prepare_block_tables(seqs)
 ```
 
-`cu_seqlens_k[-1]` is 18 and `cu_seqlens_q[-1]` is 8. This is because there are cached tokens in both requests A and B. In this case, we need to fetch the previous KV cache. In order to do so, we call the `prepare_block_tables` function.
+`cu_seqlens_k[-1]` is 18 and `cu_seqlens_q[-1]` is 8. This is because there are cached tokens in both sequences A and B. In this case, we need to fetch the previous KV cache. In order to do so, we call the `prepare_block_tables` function.
 
 As explained above, all sequences need to match the maximum block length among the sequences, which is 2 in this case. Since sequence C only has one block, we pad it with `-1`.
 
@@ -686,11 +698,11 @@ This turns out to require a careful trace through FlashAttention’s variable-le
 Before finishing this note, let's actually measure the performance of both and see if there are any performance gains, since this is what mixed batching is (theoretically) supposed to improve.
 
 > [!NOTE]
-> This is not a controlled comparison between the *original* nano-vLLM and nano-vLLM-v1. I later noticed that nano-vLLM [now](https://github.com/GeeeekExplorer/nano-vllm/commit/8d63a98c03805e54e9a422fd83fff7a4780c17dc) supports chunked prefill. So the main scheduling difference examined here is that nano-vLLM-v1 can mix prefill and decode requests in the same iteration. Both engines run in eager mode because nano-vLLM-v1 currently has CUDA Graph issues. See the [benchmark repository](https://github.com/junuxyz/nano-vllm-bench) for the full setup.
+> This is not a controlled comparison between the *original* nano-vLLM and nano-vLLM-v1. I later noticed that nano-vLLM [now](https://github.com/GeeeekExplorer/nano-vllm/commit/8d63a98c03805e54e9a422fd83fff7a4780c17dc) supports chunked prefill. So the main scheduling difference examined here is that nano-vLLM-v1 can mix prefill and decode sequences in the same iteration. Both engines run in eager mode because nano-vLLM-v1 currently has CUDA Graph issues. See the [benchmark repository](https://github.com/junuxyz/nano-vllm-bench) for the full setup.
 
 I ran both nano-vllm and nano-vllm-v1 with the settings below:
 - 1 x RTX 4090 with Qwen3-8B
-- 256 requests
+- 256 sequences
 - 128-2,048 input tokens
 - 64-256 output tokens
 - eager execution
@@ -700,18 +712,18 @@ I ran both nano-vllm and nano-vllm-v1 with the settings below:
 <p align="center">
   <img src="../../assets/notes/inside-nano-vllm-v1/inside-nano-vllm-v1-6.png" width="680" />
   <br />
-  <sub>Figure 6. Throughput and tail-latency results at a request rate of 2 requests/s.</sub>
+  <sub>Figure 6. Throughput and tail-latency results at a sequence rate of 2 sequences/s.</sub>
 </p>
 
-At 2 requests/s, both engines sustain about 309 output tokens/s, while nano-vLLM-v1 reduces p99 TTFT from 1,189 ms to 536 ms, p99 TPOT from 63.5 ms to 49.6 ms, and p99 ITL from 337 ms to 62.6 ms. You can see that nano-vllm-v1 handles tail latency better in general.
+At 2 sequences/s, both engines sustain about 309 output tokens/s, while nano-vLLM-v1 reduces p99 TTFT from 1,189 ms to 536 ms, p99 TPOT from 63.5 ms to 49.6 ms, and p99 ITL from 337 ms to 62.6 ms. You can see that nano-vllm-v1 handles tail latency better in general.
 
 <p align="center">
   <img src="../../assets/notes/inside-nano-vllm-v1/inside-nano-vllm-v1-7.png" width="600" />
   <br />
-  <sub>Figure 7. Maximum-throughput results with the request rate set to infinity.</sub>
+  <sub>Figure 7. Maximum-throughput results with the sequence rate set to infinity.</sub>
 </p>
 
-With the request rate set to infinity (which is used to measure the maximum throughput of the engine), nano-vLLM-v1 slightly increases output throughput from 448 to 478 tokens/s.
+With the sequence rate set to infinity (which is used to measure the maximum throughput of the engine), nano-vLLM-v1 slightly increases output throughput from 448 to 478 tokens/s.
 
 ## Acknowledgements
 

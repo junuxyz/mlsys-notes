@@ -2,17 +2,17 @@
 
 In this note, we will dissect nano-vLLM at the code level to understand how a modern LLM inference engine is constructed from the ground up. While its architecture (V0) has since been deprecated in favor of more advanced designs (V1+ in the original vLLM), core principles such as efficient memory management using PagedAttention, dynamic batching, KV caching, and scheduling remain foundational and largely unchanged across today's high-performance engines.
 
-I specifically chose this repository because of its minimal, hackable design. With roughly ~1,200 lines of clean Python code (plus a little bit of Triton kernels), it strips away the boilerplate and production complexity of the full vLLM. By the end of this walkthrough, you’ll have a clearer mental model of how inference engines work.
+I specifically chose this repository because of its minimal, hackable design. With roughly ~1,200 lines of clean Python code (plus a little bit of [Triton](https://junupark.xyz/triton-notes/) kernels), it strips away the boilerplate and production complexity of the full vLLM. By the end of this walkthrough, you’ll have a clearer mental model of how inference engines work.
 
 ## What is nano-vllm?
 
 <p align="center">
-  <img src="../assets/notes/inside-nano-vllm/inside-nano-vllm-1.png" width="400" />
+  <img src="../../assets/notes/inside-nano-vllm/inside-nano-vllm-1.png" width="400" />
   <br />
   <sub>Figure 1. nano-vLLM is a minimal implementation of a vLLM-style inference engine.</sub>
 </p>
 
-nano-vLLM is a lightweight vLLM implementation built from scratch<sup><a href="#reference-1">[1]</a></sup>, which focuses on offline inference and is based on the earlier V0 architecture. Despite its small size, it delivers competitive performance (check the repository for specifics) thanks to aggressive use of prefix caching, Tensor Parallelism, torch.compile, and CUDA Graphs.
+nano-vLLM is a lightweight vLLM implementation built from scratch<sup><a href="#reference-1">[1]</a></sup>, which focuses on offline inference and is based on the earlier V0 architecture. Despite its small size, it delivers competitive performance (check the [repository](https://github.com/GeeeekExplorer/nano-vllm) for specifics) thanks to aggressive use of prefix caching, Tensor Parallelism, torch.compile, and CUDA Graphs.
 
 This note is divided into two parts. First, we will go over how a modern LLM Inference Engine works at a high level based on the life cycle of a sequence and core abstractions worth noting. The second part walks through the actual codebase for a more fine-grained understanding.
 
@@ -20,7 +20,14 @@ This note is divided into two parts. First, we will go over how a modern LLM Inf
 
 ## Engine Overview
 
-What is an LLM Inference Engine? The sole goal of an engine is to run LLM inference with high performance, where performance usually ends up being 1. lower cost per token 2. lower token latency. (See more on my previous post<sup><a href="#reference-2">[2]</a></sup>) Simply put, an LLM Inference Engine maximizes the performance of serving tokens to users.
+First off, what is the goal of LLM Inference Engine?
+
+The two main goals of an engine is to run LLM inference with high performance, where performance usually ends up being
+1. lower cost per token
+2. lower token latency.
+(See more on my previous post<sup><a href="#reference-2">[2]</a></sup>)
+
+Simply put, an LLM Inference Engine maximizes the performance of serving tokens to users, while meeting the latency goals. In other words, this is also explained as achieving _high throughput, low latency_.
 
 The engine largely has the following components with separate interests:
 - **Orchestrator**: Takes the user's prompts, uses the subcomponents to process the prompts, and outputs the end result.
@@ -62,11 +69,11 @@ where each refers to:
 
 ### [Sequence](https://github.com/GeeeekExplorer/nano-vllm/blob/main/nanovllm/engine/sequence.py)
 
-**Sequence** is the fundamental class used in nano-vLLM, which defines the states each request should have. Since the state of a request changes throughout the engine's process, we need to keep track of and update each request's state. This includes token IDs, status, KV block tables, etc.
+**Sequence** is the fundamental class used in nano-vllm, which defines the states each request should have. Since the state of a request changes throughout the engine's process, we need to keep track of and update each request's state. This includes token IDs, status, KV block tables, etc.
 
 > [!NOTE]
 > **request vs sequence**
-> In nano-vLLM, a _request_ can be understood as a single sequence for simplicity. However, in real-world engines, a request can correspond to multiple sequences due to advanced mechanisms like beam search or speculative decoding (multiple possible branches as sequences).
+> In nano-vllm, a _request_ can be understood as a single sequence for simplicity. However, in real-world engines, a request can correspond to multiple sequences (1:N relationship) due to advanced mechanisms like beam search or speculative decoding (multiple possible branches as sequences).
 
 ```python
 class SequenceStatus(Enum):
@@ -98,7 +105,7 @@ Some attributes worth noting:
 - `num_tokens`: number of processed tokens including the input tokens.
 - `num_prompt_tokens`: only the input tokens.
 - `num_cached_tokens`: Tokens that are reused using prefix cache.
-- `block_table`: maps the logical KV cache to the physical KV cache memory index.
+- `block_table`: maps the logical KV cache to the physical KV cache memory index. The KV Block Manager doesn't need to be aware of which block is being used in the request, since each request's block table is bookkeeping all that information.
 
 ### [Scheduler's waiting and running queue](https://github.com/GeeeekExplorer/nano-vllm/blob/main/nanovllm/engine/scheduler.py#L15-L16)
 
@@ -122,9 +129,7 @@ _CONTEXT = Context()
 # ...
 ```
 
-`Context` is used as the information (mainly batch layout info) for the GPU kernel. This is sent to the model runner right before it executes the forward pass. 
-
-This means each request may be in a different phase (prefill or decode) with a different length, and their KV cache blocks are all diffused in physical memory. Context helps combine all the local sequence information into one dense kernel launch so the GPU can just run it.
+`Context` is used as the information (mainly batch layout info) for the GPU kernel. This is sent to the model runner as "context" right before it executes the forward pass. Context helps combine all the local sequence information into one dense kernel launch so the GPU can just run it.
 
 Also note that Context is not per sequence, but per batch. You can think of it as an overall context of how the GPU (kernel) should operate for the upcoming batch's forward pass. 
 
@@ -135,24 +140,34 @@ It is helpful to know the abstractions (fields) used in Context in order to unde
 - `slot_mapping`: maps logical blocks to the physical KV cache slots (in VRAM).
 - `block_tables`: Page table which manages which KV blocks are used for each sequence.
 
+> [!NOTE]
+> Notice that `is_prefill` is a single boolean passed to the model runner. This means prefill and decode **cannot be mixed** in a single step in nano-vllm.
+>
+> One step can consist of either all prefill sequences or all decode sequences. While modern inference engines allow a mixture of both phases in one step, nano-vllm (and vLLM v0 architecture) omits the engineering for simplicity.
+
 ### KV Cache in Practice
 
-It is very easy to understand KV cache abstractly. So let's make the mental model clearer, mostly because it is not one thing but many abstractions tied together. So let's make it more concrete in this section.
+KV cache is easy to understand in the abstract, but its implementation involves several related concepts. So let's make them more concrete in this section!
 
-As many people know, KV Cache is memory we store for the previous token's Keys and Values so we do not need to recompute it for the next decode phases. 
+What is KV Cache?
+
+KV Cache is the key and value vectors already computed for previous tokens that we store in memory so we can reuse them in later decoding steps. For each KV head in each request, the cached keys and values form two matrices, each with shape $T_{\text{past}} \times d_{\text{head}}$, where $T_{\text{past}}$ is the number of past tokens cached and $d_{\text{head}}$ is the head dimension.
 
 > [!NOTE]
 > **Additional Resources for KV Cache**
 > If you want to know more about it, check either of these two<sup><a href="#reference-3">[3]</a></sup><sup><a href="#reference-4">[4]</a></sup> (or both!) posts, which are very helpful.
 
-In vLLM and PagedAttention, we save and manage KV cache in terms of blocks, similar to how Paging works in OS. If you are not familiar and want to understand the theoretical concept first, I recommend reading my past post on PagedAttention<sup><a href="#reference-5">[5]</a></sup>.
+In vLLM and PagedAttention, we save and manage KV cache in terms of _blocks_, similar to how Paging works in OS. If you are not familiar and want to understand the theoretical concept first, I recommend reading my past post on PagedAttention paper<sup><a href="#reference-5">[5]</a></sup>.
 
 So how do we manage KV Cache Blocks in practice?
 
 **Step 1. check KV cache memory for given hardware, model config**
 
 The very first thing we should do is to see how many blocks we can allocate for the given configurations.
-In the most naive way, the memory we can allocate for KV Cache is the total VRAM size - model weight - activation memory, but in reality we need to consider GPU utilization, additional library overheads, CUDA overheads, etc. We will talk more about this in Part 2. The point is, we need to estimate how many blocks we can actually create. Say we can save KV Cache for 100 tokens at maximum on our given hardware and model configuration. If we set block size to 4, we end up having 25 blocks.
+
+In the most naive way, the memory we can allocate for KV Cache is the $\text{Total VRAM} - \text{Model weight memory} - \text{Activation memory}$, but in reality we need to consider `gpu_memory_utilization` and some additional overhead such as GPU utilization, library overhead, CUDA Graphs, etc. We will talk more about this in Part 2 of this note.
+
+The point is, we need to estimate how many blocks we can actually create. Say we can save KV Cache for 100 tokens at maximum on our given hardware and model configuration. If we set block size to 4, we end up having 25 blocks.
 
 **Step 2. initialize physical KV blocks**
 
@@ -163,32 +178,32 @@ physical blocks:
 [0] [1] [2] [3] ... [24]
 ```
 
-At this point, these blocks are just empty memory slots. The Block Manager keeps track of which blocks are free and which blocks are currently used.
+At this point, these blocks are just empty memory slots. The Block Manager keeps a track of which blocks are free and which blocks are currently used.
 
 **Step 3. split each sequence into logical blocks**
 
 When a new request comes in, its prompt tokens are divided into logical blocks based on the block size.
 
-For example, say prompt length is 7 and the prompt token ids are:
+For example, say the request's input prompt length is 7 and the prompt token ids are:
 
 ```
 [1, 2, 3, 4, 5, 6, 7]
 ```
 
-and block size is 4, then the sequence has two logical blocks:
+If block size is 4, then the sequence has two logical blocks:
 
 ```
 logical block 0: [1, 2, 3, 4]
 logical block 1: [5, 6, 7]
 ```
 
-These logical blocks describe how many blocks are needed for the sequence. These do not have a physical memory location yet.
+These logical blocks describe how many blocks are needed for the sequence and are **not yet** coupled with the physical blocks (thus no memory allocation has happened yet).
 
 **Step 4. map logical blocks to physical blocks using per-Sequence Block Table**
 
-Now if we want to schedule this request, Scheduler asks for Block Manager if there are enough free physical blocks to allocate KV cache for the Sequence's logical blocks.
+Now we check if the inference engine can actually handle this request. Scheduler asks for Block Manager if there are enough free capacity (physical blocks) to allocate KV cache for the Sequence's logical blocks.
 
-For example, if no physical blocks are used yet (`[0,1,2,...24]` free blocks), it will assign physical block `0` to logical block `0`, and physical block `1` to logical block `1`.
+For example, if no physical blocks are used yet (`[0,1,2,...24]` in free blocks list), it will assign physical block `0` to logical block `0`, and physical block `1` to logical block `1`.
 
 ```
 seq.block_table = [0, 1]
@@ -201,21 +216,13 @@ logical block 0 -> physical block 0
 logical block 1 -> physical block 1
 ```
 
-This is important to understand: **KV cache ownership is sequence-level state**. 
+Important thing to understand in this section is that: **KV cache ownership is sequence-level state** - while the Block Manager tracks the global pool of used and free physical blocks, each sequence carries the list of physical blocks that belong to it.
 
-While the Block Manager tracks the global pool of used and free physical blocks, each sequence carries the list of physical blocks that belong to it.
-
-This allows physical blocks to be non-contiguous, since the sequence can think its KV cache is continuous, while the actual physical KV cache can be scattered across GPU memory.
+This allows physical blocks to be non-contiguous, since the logical block can think its KV cache is continuous, while the block table mapping does all the mapping between logical blocks (position) and physical blocks (position's value).
 
 **Step 5. convert block-level mapping into token-level slot mapping**
 
-Because the attention kernel writes KV cache at the token level, before running the model, Model Runner converts the block table into `slot_mapping`, where _slot_ means the exact memory location of where each token's KV should be saved.
-
-```
-slot = physical block id * block_size + offset
-```
-
-where the offset is the local index of the token in the block.
+While KV cache is managed as blocks, the attention kernel writes KV cache one token at a time. So before running the model, Model Runner converts the block table into `slot_mapping`, where _slot_ means the exact memory location of where each token's KV should be saved. This can be described as `slot = physical block id * block_size + offset`.
 
 For example, 2 blocks using physical block 0 and 1 can be converted as:
 
@@ -236,17 +243,11 @@ and the final slot mapping becomes:
 slot_mapping = [0, 1, 2, 3, 4, 5, 6]
 ```
 
-Each slot represents one token position in the KV cache. For each slot, the KV cache stores that token's K and V vectors across layers, whose total storage is roughly:
+For each slot, the KV cache stores that token's K and V vectors across transformer layers, whose total storage is roughly: $2 \times H_{\mathrm{KV}} \times d_{\mathrm{head}} \times \text{bytes per element}$ and yes, this is the famous KV Cache size equation.
 
-```
-2 * num_kv_heads * head_dim * dtype_size
-```
+**Step 6. write newly computed KV into physical slots**
 
-**Step 7. write newly computed KV into physical slots**
-
-During the forward pass, the model computes new K and V tensors during QKV projection. Since we want to reuse these K/V values later, the attention layer stores them into the persistent KV cache.
-
-This is where `slot_mapping` is used.
+During the forward pass, the model projects new K and V vectors. Since we want to reuse these K/V values later, we use the `slot_mapping` information to save them into the GPU HBM memory.
 
 ```
 the K/V for token 0 should be written to slot 0
@@ -255,14 +256,13 @@ the K/V for token 1 should be written to slot 1
 the K/V for token 6 should be written to slot 6
 ```
 
-After this forward pass, the sequence's prompt KV cache is now stored in physical KV blocks `0` and `1`.
+After this, the sequence's prompt KV cache is finally stored in physical KV blocks `0` and `1`.
 
-**Step 8. read previous KV cache during decode**
+**Step 7. write new KV and read previous KV during decode**
 
-During decode, the sequence only sends the last generated token as input but attention still needs the full previous context.
+Until step 6, we were looking at how KV cache blocks are created, mapped, and KV cache was actually stored. Then what changes during decode?
 
-So the attention layer uses `seq.block_table` / `block_tables` to find the previous physical KV cache blocks, and uses `slot_mapping` to store the newly generated token's K/V.
-
+Each decoding step takes only the last generated token as input, since we're leveraging KV cache. Attention uses each request's `block_table` to locate the cached keys and values of earlier tokens, while `slot_mapping` specifies where to store the keys and values computed for the current input token.
 
 For example, after prefill is done for sequence of length 7, during decode it only sends the last token as input:
 
@@ -271,7 +271,7 @@ input_ids = [7]
 positions = [6]
 ```
 
-But attention still needs to attend over the full context:
+But in attention, current token still needs to attend over the full context:
 
 ```
 tokens 0, 1, 2, 3, 4, 5, 6
@@ -284,13 +284,7 @@ read K/V from physical block 0: slots 0, 1, 2, 3
 read K/V from physical block 1: slots 4, 5, 6
 ```
 
-Then the model samples the next token. Suppose the next token is:
-
-```
-next_token = 8
-```
-
-After appending it, the sequence becomes:
+Then the model samples the next token (suppose the next token is `8`). After appending it, the sequence becomes:
 
 ```
 seq = [1, 2, 3, 4, 5, 6, 7, 8]
@@ -312,7 +306,7 @@ write new K/V: slot 7
 
 **Step 9. free the KV cache blocks after the Sequence is finished**
 
-KV cache blocks are only useful while the sequence is still running. Once the sequence reaches `<eos>` or `max_tokens`, we no longer need its stored KV values. Blocks used for the sequence get removed from the used block queue in Block Manager and appended to the free block queue.
+KV cache blocks are only useful while the sequence is still in the running state. Once the sequence reaches `<eos>` or `max_tokens`, it's finished and we no longer need its stored KV values. Blocks used for the sequence get removed from the used block queue in Block Manager and appended again to the free block queue.
 
 ### A tldr of end to end process
 
@@ -320,7 +314,7 @@ So how does LLM Engine work in practice? The overall interaction of the global c
 
 1. `Config` information is initialized and distributed to submodules. This happens only once when we first launch the engine.
 
-2. For each iteration (one forward pass):
+2. For each request:
 	1. The user's prompt is tokenized and wrapped as a `Sequence` object, then added to the Scheduler. It is first initialized and pushed to the waiting queue.
 	2. Scheduler checks the memory constraints based on BlockManager and allocates resources to sequences, prioritizing the earliest sequences (FCFS<sup><a href="#reference-6">[6]</a></sup>)
 	3. Model runner prepares batch layout and Attention-related context from `Context`.
@@ -384,14 +378,18 @@ This can be very easy to get lost in, so along the way, we will use two Sequence
 
 **[`LLMEngine`](https://github.com/GeeeekExplorer/nano-vllm/blob/main/nanovllm/engine/llm_engine.py)** is the main orchestrator which initializes all subsystems and manages the lifecycle of a request. It creates worker processes for tensor parallel execution, initializes the `ModelRunner`, tokenizer, and `Scheduler`, and coordinates the generation loop.
 
-As we've just seen in `example.py`, the two main use cases where we call LLMEngine are when initializing or calling the `generate` function:
+As we've just seen in `example.py`, the two main use cases where we call LLMEngine are when:
+1. initializing or
+2. calling the `generate` function
 
 ```python
+# 1. initializing
 llm = LLM(model_path, **kwargs)
+# 2. call `generate` function
 outputs = llm.generate(prompts, sampling_params)
 ```
 
-### [`llm = LLM(model_path, **kwargs)`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/example.py#L9)
+### 1) [`llm = LLM(model_path, **kwargs)`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/example.py#L9)
 
 Let's first look at how the LLMEngine is initialized (the first line).
 
@@ -427,7 +425,7 @@ def __init__(self, model, **kwargs):
 
 **2. Setup multiprocessing configuration for TP**
 
-In nano-vLLM, only TP(Tensor Parallelism) is implemented. This allows efficient inference using multiple GPUs.
+In nano-vllm, only TP(Tensor Parallelism) is implemented. It is one of the most widely used parallelism methods in LLM Inference. This allows efficient inference using multiple GPUs.
 
 ```python
 self.ps = []
@@ -459,14 +457,13 @@ For rank 0, we create a Model Runner in the main process, passing the `events` c
 self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True)
 ```
 
-Notice that tokenization lives in the main process, not in the workers. Workers only deal with tensors (input: token ids, output: logits). The tokenizer's job is to encode the input prompt into token ids before the model sees it, and to decode the generated token ids back to text afterward. While it is possible to create our own tokenizer (e.g. Rust BPE tokenizer in [nanochat](https://github.com/karpathy/nanochat/blob/master/nanochat/tokenizer.py)), if the model is in HuggingFace, we can use HuggingFace's AutoTokenizer API to load the vocabulary set for the target model.
+Notice that tokenization lives in the main process, not in the workers. Workers only deal with tensors (input: token ids, output: logits). The tokenizer's job is to tokenize the input prompt into token ids before the model sees it, and to detokenize the generated token ids back to text afterward. While it is possible to create our own tokenizer (e.g. Rust BPE tokenizer in [nanochat](https://github.com/karpathy/nanochat/blob/master/nanochat/tokenizer.py)), if the model is in HuggingFace, we can use HuggingFace's AutoTokenizer API to load the vocabulary set for the target model.
 
 **5. create Scheduler**
 
 ```python
 self.scheduler = Scheduler(config)
 ```
-
 
 **6. register exit handler**
 
@@ -476,7 +473,7 @@ atexit.register(self.exit)
 
 When the program finishes, the Python interpreter begins shutdown. Right before exiting, the registered `self.exit()` is called, which cleans up the LLMEngine: terminating worker processes, freeing GPU memory, etc. Then the interpreter terminates.
 
-### [`llm.generate()`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/example.py#L24)
+### 2) [`llm.generate()`](https://github.com/GeeeekExplorer/nano-vllm/blob/bb823b3e06983d71485a8e1f23715ebd87d98ef8/example.py#L24)
 
 Now let's see how `llm.generate()` (the second line from `example.py`) works.
 
@@ -528,14 +525,9 @@ def step(self):
 
 Each step does three things: schedule → run → postprocess.
 
-1. The Scheduler picks which sequences to run (all prefill or all decode).
-2. Then Model Runner executes the forward pass (all prefill or all decode).
-3. The Scheduler then updates each Sequence's state based on the sampled token via `postprocess`.
-
-> [!NOTE]
-> Notice that `is_prefill` is a single boolean passed to the model runner. This means prefill and decode **cannot be mixed** in a single step in nano-vllm.
-> 
-> One step can consist of either all prefill sequences or all decode sequences. While modern inference engines allow a mixture of both phases in one step, nano-vllm (and vLLM v0 architecture) omits the engineering for simplicity.
+1. Schedule: The Scheduler picks which sequences to run (all prefill or all decode).
+2. Run: Then Model Runner executes the forward pass (all prefill or all decode).
+3. Postprocess: The Scheduler then updates each Sequence's state based on the sampled token via `postprocess`.
 
 > [!NOTE]
 > **Why does `num_tokens` go negative for decode?**
@@ -601,6 +593,7 @@ def add(self, seq: Sequence):
 ### `schedule`
 
 The `schedule` function decides what is moved to (or sometimes preempted from) the running queue.
+
 As mentioned above, the schedule function handles prefill first for all sequences and then decode.
 
 **Prefill scheduling**
@@ -625,19 +618,19 @@ if scheduled_seqs:
     return scheduled_seqs, True
 ```
 
-nano-vLLM supports an FCFS(First Comes First Serve) queue, so it pulls sequences from the waiting queue in arrival order.
+nano-vllm supports an FCFS(First Comes First Serve) queue, so it pulls sequences from the waiting queue in arrival order.
 
-Scheduler checks if it can allocate KV cache blocks, which is mainly bounded by
-- `max_num_seqs`: how many sequences can be scheduled in one batch.
-- `max_num_batched_tokens`: how many tokens can be processed in one batch. If this is too big, throughput will be better but latency will increase.
-- `block_manager.can_allocate()`: Block manager handles the actual KV cache memory blocks. If there are no blocks left to give (out of memory), we cannot schedule more for this batch. This is explained below.
+Scheduler checks if it can allocate KV cache blocks to a request, which is mainly bounded by three things:
+1. `max_num_seqs`: how many sequences can be scheduled in one batch.
+2. `max_num_batched_tokens`: how many tokens can be processed in one batch. If this is too big, throughput will be better but latency will increase.
+3. `block_manager.can_allocate()`: Block manager handles the actual KV cache memory blocks. If there are no blocks left to give (out of memory), we cannot schedule more for this batch. This is explained below.
 
 > [!NOTE]
 > **Why do we cap both `max_num_seqs` and `max_num_batched_tokens`?**
 > Because each alone isn't enough:
 > - **Without capping tokens**: a single sequence with a very long prompt length could OOM the GPU.
 > - **Without capping sequences**: too many concurrent sequences bloats memory management overhead and increases latency.
->   
+>
 >   so we need to consider both.
 
 How does `block_manager.can_allocate()` work?
@@ -675,43 +668,53 @@ Back to our example:
 [5, 6, 7]    = "for Seoul."
 ```
 
-For each block of the Sequence, we compute the hash of the entire block. `compute_hash` creates a hash based on the block if it's the first block of the sequence; otherwise, it internally hashes the previous prefix cache with the current block tokens. 
+**Prefix Caching**
+
+For each block of the Sequence, we compute the hash of the entire block. `compute_hash` creates a hash based on the block if it's the first block of the sequence. Otherwise, it internally **hashes the previous prefix cache** with the current block tokens. So all the subsequent KV blocks' hashes are dependent to its previous context.
 
 If the hashed block is not in the hashed block list(`hash_to_block_id`), it means there is no KV cache stored for that block (and future blocks of that sequence), so we break the loop. If a KV cache is found, we increase the `num_cached_blocks` and decrease the `num_new_blocks` (new blocks to allocate).
+
+What if prefix cache matches in multiple blocks? Since this is a loop, we run again and increase `num_cached_blocks` and decrease the `num_new_blocks` until there is no matching block in the hashed block list.
 
 If the number of new blocks needed is more than the free blocks that can be allocated, we cannot allocate memory for that Sequence and thus return `-1` as False. If we can, we return the number of cached blocks that can be reused.
 
 > [!NOTE]
 > **Why does it hash the previous prefix cache information together?**
-> The reason we hash is to support Prefix Caching. If we don't hash the previous prefix information, there can be a case where the tokens in the block are identical but context is different.
-> 
+> The reason we hash is to support **Prefix Caching**. If we don't hash the previous prefix information, there can be a case where the tokens in current block are identical but context is different.
+>
 > For example, suppose the two sequences below:
-> 
+>
 > ```python
 > seq_c = [1, 2, 3, 4, 8, 9, 10, 7]
 > # [1, 2, 3, 4] = "Plan a Seoul Trip"
 > # [8, 9, 10, 7] = "Include traditional markets."
-> 
+>
 > seq_d = [11, 12, 13, 14, 8, 9, 10, 7]
 > # [1, 2, 11, 4] = "Plan a Tokyo Trip"
 > # [8, 9, 10, 7] = "Include traditional markets."
 > ```
 >
 > Both sequences share the same second block `[8, 9, 10, 7]` ("Include traditional markets."), but the previous context is different: `[1, 2, 3, 4]` vs `[1, 2, 11, 4]`.
-> 
-> In this case, the hash differs. Check out a minimal experiment done here<sup><a href="#reference-7">[7]</a></sup>
-> 
+>
+> In this case, the hash differs and we cannot use prefix cache :(. Check out a minimal experiment done here<sup><a href="#reference-7">[7]</a></sup>
+>
+> Edit: I've found a [great resource](https://sankalp.bearblog.dev/how-prompt-caching-works/) that explains prefix caching in details. Check them out if you're interested.
 
 After checking if allocating blocks for the Sequence is possible, we need to actually allocate the blocks. This is done by `allocate()`.
 
 `allocate()` allocates free physical KV blocks to each Sequence, where each Sequence has a Block Table that maps logical KV blocks (0, 1, 2, ...) to physical KV blocks. Internally, Block Manager has a queue called `free_block_ids`, which pops a free block and appends it to the sequence's page table.
 
-For example, if free block ids are: `free_block_ids = [7, 2, 9, 5, ...]` and we are going to process `seq_a = [1, 2, 3, 4, 5, 6, 7]` (`"Write a travel plan for Seoul."`), logical block 0 will have `[1, 2, 3, 4]` (`"Write a travel plan"`) and logical block 1 contains `[5, 6, 7]` (`"for Seoul."`). `allocate()` pops the free block ids queue (7) and maps logical block 0 to physical block 7. Then since we need another physical block for logical block 1, we pop the next block id (2) and map it with logical block 1, where `seq.block_table = [7, 2]`. Each index refers to the logical block (`seq.block_table[0]` is the physical block id for logical block 0).
+For example, if free block ids are listed as follows:
+```
+free_block_ids = [7, 2, 9, 5, ...]
+```
+
+and we are going to process `seq_a = [1, 2, 3, 4, 5, 6, 7]` (`"Write a travel plan for Seoul."`), logical block 0 will have `[1, 2, 3, 4]` (`"Write a travel plan"`) and logical block 1 contains `[5, 6, 7]` (`"for Seoul."`). `allocate()` pops the free block ids queue (7) and maps logical block 0 to physical block 7. Then since we need another physical block for logical block 1, we pop the next block id (2) and map it with logical block 1, where `seq.block_table = [7, 2]`. Each index refers to the logical block (`seq.block_table[0]` is the physical block id for logical block 0).
 
 As we reuse the cached blocks that share the same prefix, the physical block's reference count increases. Newly generated blocks are only used for the current sequence, so its reference is set to 1. A visual explanation from Inside vLLM post is also helpful:
 
 <p align="center">
-  <img src="../assets/notes/inside-nano-vllm/inside-nano-vllm-2.png" width="540" />
+  <img src="../../assets/notes/inside-nano-vllm/inside-nano-vllm-2.png" width="540" />
   <br />
   <sub>Figure 2. Prefix cache blocks can be shared across sequences with reference counting.<sup><a href="#reference-8">[8]</a></sup></sub>
 </p>
@@ -765,8 +768,9 @@ Unlike prefill, decode generates one token at each forward pass, so it only chec
 
 > [!NOTE]
 > **Why do we need to preempt(evict)?**
+>
 > Why can't we just push sequences to running queue that has no possibility of eviction?
-> This is actually the approach done in previous inference engines such as Orca, where we preallocate KV cache assuming maximum token length. While this approach lets us avoid considering eviction, this makes the batch size much smaller because some requests are short.
+> This is actually the approach done in previous inference engines such as [Orca](https://www.usenix.org/conference/osdi22/presentation/yu), where we preallocate KV cache assuming maximum token length. While this approach lets us avoid considering eviction, this makes the batch size much smaller because most requests don't use maximum token lengths.
 >
 > The reason why eviction happens is that when we first allocated blocks to the input prompt, it didn't exceed the total KV cache blocks in Block Manager. However, as the sequences increase during the decode phase, each sequence requires more KV blocks, and in some cases it exceeds the total KV cache blocks that can be given. This is the case where we evict.
 >
@@ -790,7 +794,7 @@ def postprocess(self, seqs: list[Sequence], token_ids: list[int]) -> list[bool]:
 
 `ModelRunner` is the second part in the `step()` function from LLMEngine, where it is in charge of actually running the forward pass based on whatever the scheduler scheduled.
 
-Step 3 is probably the densest part of the codebase since it does distributed process management, model initialization, physical KV cache memory handling, input preparation, FlashAttention, and CUDA graph optimization. Since our primary goal is to understand the engine, we will not go deep into model and kernel-level details.
+Step 3 is probably the densest(?) part of the codebase since it does distributed process management, model initialization, physical KV cache memory handling, input preparation, FlashAttention, and CUDA graph optimization. Since our primary goal is to understand the engine, we will not go deep into model and kernel-level details.
 
 We will see 
 1. how model runner (and the distributed environment) is initialized.
@@ -940,7 +944,7 @@ for seq in seqs:
 
 For each sequence, there are four local values:
 
-- `start`: the first token position that still needs to be computed. If there is no prefix cache, `start = 0`. If the first four tokens are already cached, `start = 4`.
+- `start`: the first token position that needs to be computed. If there is no prefix cache, `start = 0`. If the first four tokens are already cached, `start = 4`.
 - `end`: the exclusive end position of the chunk being computed, so the actual input slice is `seq[start:end]`.
 - `seqlen_q`: the number of query tokens computed in this forward pass. In prefill, this is the scheduled prompt chunk length. If there is prefix cache that can be reused, this may be only the uncached suffix.
 - `seqlen_k`: the full key/value context length visible to attention. It equals `end`, because the newly computed query tokens can attend to every token from position `0` up to `end - 1`.
@@ -1184,7 +1188,6 @@ if context.is_prefill:
 									softmax_scale=self.scale, causal=True)
 ```
 
-
 ### Eager Mode vs CUDA Graph Capture
 
 While prefill always uses `self.model.compute_logits(self.model(input_ids, positions))` for forward pass, we may sometimes use what is called CUDA Graph Capture mode.
@@ -1194,7 +1197,7 @@ Before we look into the codebase, what is eager mode and CUDA graph capture?
 **Eager mode** means PyTorch executes operations immediately, one by one, as normal Python code runs. So `self.model.compute_logits(self.model(input_ids, positions))` will launch: embedding kernel, attention kernels, linear kernels, norm kernels, MLP kernels, LM head kernel, etc. in a dynamic manner, for every forward pass. While this is flexible, it creates overhead from calling Python/PyTorch to launch kernels every time. 
 
 <p align="center">
-  <img src="../assets/notes/inside-nano-vllm/inside-nano-vllm-3.png" width="300" />
+  <img src="../../assets/notes/inside-nano-vllm/inside-nano-vllm-3.png" width="300" />
   <br />
   <sub>Figure 3. CUDA Graph capture records a stable sequence of GPU operations for replay.</sub>
 </p>
@@ -1219,7 +1222,7 @@ else:
     return self.model.compute_logits graph_vars["outputs"][:bs]
 ```
 
-It is hard to use CUDA graph capture in prefill because prompt length, total tokens, and attention shapes are highly variable. This makes efficient graph capture very hard. In decode, each running sequence contributes one token.
+It is hard to use CUDA graph capture in prefill because prompt length, total tokens, and attention shapes are highly variable. This makes efficient graph capture very hard.
 
 # Wrapping Up
 
@@ -1294,7 +1297,7 @@ If a weight corresponds to a packed module, this part remaps it and loads it int
 According to the vLLM-omni documentation<sup><a href="#reference-10">[10]</a></sup>, a useful formula for memory calculation is to calculate the total available VRAM - model weight memory - activation memory.
 
 <p align="center">
-  <img src="../assets/notes/inside-nano-vllm/inside-nano-vllm-4.png" width="540" />
+  <img src="../../assets/notes/inside-nano-vllm/inside-nano-vllm-4.png" width="540" />
   <br />
   <sub>Figure 4. Example of remaining VRAM headroom after loading about 64 GB of model weights: roughly 16 GB for KV cache, activations, workspace buffers, and runtime overhead.<sup><a href="#reference-11">[11]</a></sup><sup><a href="#reference-12">[12]</a></sup></sub>
 </p>
@@ -1324,7 +1327,7 @@ This part is to get the activation memory. While activation memory can be a bott
 > - `used`: total GPU memory currently in use from the CUDA driver's point of view.
 > - `current`: Memory currently allocated from PyTorch's CUDA allocator point of view which is usually mostly the model weights.
 > - `peak`: The maximum memory allocation observed by PyTorch's CUDA allocator. Usually corresponds to the moment when model weights plus activations / workspace memory reached their highest usage.
-> 
+>
 > So peak - current ~= additional activation memory needed during forward pass
 
 
