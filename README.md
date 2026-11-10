@@ -10,7 +10,7 @@ Currently focusing on LLM serving system and inference optimization.
 - [PagedAttention paper review](notes/pagedattention.md)
 - [Softmax: From Naive to Blocked Softmax](notes/softmax.md)
 - [Rejection Sampling in Speculative Decoding](notes/speculative-decoding-rejection-sampling.md)
-- [Triton Notes](labs/triton-notes/README.md)
+- [Triton Notes](https://junupark.xyz/triton-notes/)
 
 ### Transformer
 
@@ -40,7 +40,6 @@ Currently focusing on LLM serving system and inference optimization.
 - [Accelerating Diffusion Inference via Caching](notes/accelerating-diffusion-inference-via-caching.md)
 
 ## Labs
-- [Triton notes and kernels](labs/triton-notes/README.md): GPU kernel experiments, notes, and interactive diagrams
 - [microengine](labs/microengine/README.md): a minimal serving engine
 - [tinyorca](https://github.com/junuxyz/tinyorca): a minimal implementation of [ORCA](https://www.usenix.org/system/files/osdi22-yu.pdf)
 - [nano-vllm-bench](https://github.com/junuxyz/nano-vllm-bench): a performance comparison between nano-vLLM and nano-vLLM-v1
