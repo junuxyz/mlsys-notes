@@ -1,0 +1,56 @@
+[
+  {
+    "slug": "llm-inference",
+    "source": "notes/llm-inference-intro-p1.md",
+    "title": "Introduction to LLM Inference Part 1",
+    "topic": "Inference"
+  },
+  {
+    "slug": "mla",
+    "source": "notes/transformer/mla.md",
+    "title": "MLA (Multi-Head Latent Attention) Explained",
+    "topic": "Attention"
+  },
+  {
+    "slug": "vllm-multiprocess",
+    "source": "notes/how-mp-serving-works-in-vllm.md",
+    "title": "How Multiprocess Serving Works in vLLM",
+    "topic": "Inference"
+  },
+  {
+    "slug": "pagedattention",
+    "source": "notes/pagedattention.md",
+    "title": "PagedAttention paper review",
+    "topic": "Inference"
+  },
+  {
+    "slug": "softmax",
+    "source": "notes/softmax.md",
+    "title": "Softmax: From Naive to Blocked Softmax",
+    "topic": "Kernels"
+  },
+  {
+    "slug": "gpu-architecture",
+    "source": "notes/accelerators/gpu-architecture.md",
+    "title": "NVIDIA GPU Architecture: From GPC to SM",
+    "topic": "Hardware"
+  },
+  {
+    "slug": "tensor-parallelism",
+    "source": "notes/distributed/tp.md",
+    "title": "Tensor Parallelism",
+    "topic": "Distributed"
+  },
+  {
+    "slug": "orca",
+    "source": "notes/orca.md",
+    "title": "ORCA paper review",
+    "topic": "Inference"
+  },
+  {
+    "slug": "speculative-decoding",
+    "source": "notes/speculative-decoding-rejection-sampling.md",
+    "title": "Rejection Sampling in Speculative Decoding",
+    "topic": "Inference"
+  }
+]

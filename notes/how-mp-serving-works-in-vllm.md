@@ -159,7 +159,7 @@ IPC: same node
 API server process -> ipc:///tmp/vllm-xxx/input.sock -> local EngineCore process
 
 TCP: cross-node / distributed DP
-frontend on node-0 -> tcp://10.0.0.5:14567 -> EngineCore or DP peer on node-1
+frontend on node-0 -> tcp://node-1.example:14567 -> EngineCore or DP peer on node-1
 ```
 
 ### Startup Handshake

@@ -1,0 +1,61 @@
+name: Publish blog
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'blog/**'
+      - 'notes/**'
+      - 'labs/**/README.md'
+      - 'assets/**'
+      - 'README.md'
+      - '.github/workflows/blog.yml'
+  pull_request:
+    paths:
+      - 'blog/**'
+      - 'notes/**'
+      - 'labs/**/README.md'
+      - 'assets/**'
+      - 'README.md'
+      - '.github/workflows/blog.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blog-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: blog/package-lock.json
+      - run: npm ci
+        working-directory: blog
+      - run: npm run build
+        working-directory: blog
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: blog/dist
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

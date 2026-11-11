@@ -1,8 +1,8 @@
 # mlsys-notes
 
-Learning notes and experiments for understanding modern Machine Learning System.
+Learning notes and experiments on modern machine learning systems.
 
-Currently focusing on LLM serving system and inference optimization.
+Currently focusing on LLM serving and inference optimization.
 
 ## Notes
 - [Introduction to LLM Inference Part 1](notes/llm-inference-intro-p1.md)
@@ -20,7 +20,7 @@ Currently focusing on LLM serving system and inference optimization.
 - [tinyorca deep dive](notes/tinyorca.md)
 - [Inside nano-vLLM](notes/inference-engine/inside-nano-vllm.md)
 - [Inside nano-vLLM v1](notes/inference-engine/inside-nano-vllm-v1.md)
-- [How Multiprocess Serving Works in vLLM](notes/vllm/how-mp-serving-works-in-vllm.md)
+- [How Multiprocess Serving Works in vLLM](notes/how-mp-serving-works-in-vllm.md)
 - [Comparing Round-Robin Routing vs KV-Aware Routing on Nemotron-3-Nano](https://github.com/Prasannajaga/deployment-guide/blob/main/blogs/rr-vs-kv-aware-routing.md)
 
 ### Distributed
@@ -32,7 +32,7 @@ Currently focusing on LLM serving system and inference optimization.
 ### Hardware
 - [NVIDIA GPU Architecture: From GPC to SM](notes/accelerators/gpu-architecture.md)
 - [GPU Memory Hierarchy in CUDA](notes/accelerators/gpu-memory-hierarchy.md)
-- [CUDA Intro](notes/accelerators//cuda-intro.md)
+- [CUDA Intro](notes/accelerators/cuda-intro.md)
 - [[KR] NPU Memory Architecture and Data Reuse](notes/accelerators/kr_npu_memory_arch_and_data_reuse.pdf)
 
 
