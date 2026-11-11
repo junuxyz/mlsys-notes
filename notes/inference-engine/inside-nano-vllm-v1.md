@@ -322,7 +322,7 @@ This path is only taken when there are no preempted sequences, since any preempt
 
 All sequences in the waiting queue are waiting for their first (chunked) prefill. We first get the new tokens we can append based on the remaining token budget. Here, `num_new_computed_tokens_in_used` refers to tokens that have the same prefix and are used in the running queue, while `num_new_computed_tokens_in_free` refers to tokens that have the same prefix and have been freed but not yet overwritten. This is possible because a sequence's KV Cache is not erased when it is freed but it remains available until it is overwritten, also known as _Copy-on-Write mechanism_.
 
-![KV cache block sharing](../../Pasted%20image%2020261031111005.png)
+![KV cache block sharing](../../assets/notes/inside-nano-vllm-v1/kv-cache-block-sharing.png)
 Figure. https://vllm.ai/blog/2023-06-20-vllm
 
 Sequences that don't exceed the available KV block memory and token budget for that step are appended to the running queue and scheduled, in order.
