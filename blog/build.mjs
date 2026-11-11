@@ -44,7 +44,7 @@ for (const source of new Set([...overrides.map(post => post.source), ...readmeSo
   posts.push({ source, slug, title, topic, date });
 }
 posts.sort((a, b) => Date.parse(b.date) - Date.parse(a.date) || a.slug.localeCompare(b.slug));
-const dateLabel = post => new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(post.date.slice(0, 10)));
+const dateLabel = post => new Intl.DateTimeFormat('en-GB', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(post.date.slice(0, 10)));
 const postDate = post => `<time datetime="${escape(post.date.slice(0, 10))}">${dateLabel(post)}</time>`;
 const readmeRenderer = new Marked();
 const renderReadme = markdown => readmeRenderer.parse(markdown).replace(/href="([^"#]+)"/g, (_, href) => {
@@ -177,7 +177,7 @@ for (const post of posts) {
   const body = `<article class="post h-entry"><header class="post-header"><h1 class="post-title p-name">${escape(post.title)}</h1></header><div class="post-content e-content">${html}</div><hr><div class="post_navi"><a class="post_navi-item nav_prev" href="${previous.slug}.html"><div class="post_navi-arrow">❮</div><div class="post_navi-label">Previous post</div><div>${escape(previous.title)}</div></a><a class="post_navi-item nav_next" href="${next.slug}.html"><div class="post_navi-arrow">❯</div><div class="post_navi-label">Next post</div><div>${escape(next.title)}</div></a></div></article>`;
   await writeFile(path.join(out, `${post.slug}.html`), shell(post.title, post.title, body, 'article'));
 }
-const entries = posts.map(p => `<div class="post-item"><div class="post-date">${postDate(p)} · ${escape(p.topic)}</div><h3 class="post-title"><a class="post-link" href="${p.slug}.html">${escape(p.title)}</a></h3><div class="post-meta">${p.minutes} min read</div></div>`).join('');
+const entries = posts.map(p => `<div class="post-item"><div class="post-date">${postDate(p)}</div><h3 class="post-title"><a class="post-link" href="${p.slug}.html">${escape(p.title)}</a></h3><div class="post-meta">${p.minutes} min read</div></div>`).join('');
 await writeFile(path.join(out, 'index.html'), shell(site.title, readmeIntro.replace(/\n+/g, ' '), `<div class="home"><div class="profile-container"><div class="profile-content">${introHTML}</div></div><div class="home-sections"><h2 class="post-list-heading">Posts</h2><div class="post-list">${entries}</div></div></div>`));
 const years = [...new Set(posts.map(post => post.date.slice(0, 4)))];
 await writeFile(path.join(out, 'archive.html'), shell('Archive', 'Articles, newest first.', `<article class="post"><header class="post-header"><h1 class="post-title">Archive</h1></header><div class="post-content">${years.map(year => `<section><h2>${year}</h2><ul>${posts.filter(post => post.date.startsWith(year)).map(post => `<li>${postDate(post)} · <a href="${post.slug}.html">${escape(post.title)}</a></li>`).join('')}</ul></section>`).join('')}</div></article>`));
