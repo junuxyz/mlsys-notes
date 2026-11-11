@@ -24,3 +24,10 @@ a:focus-visible,summary:focus-visible{outline:2px solid #2a7ae2;outline-offset:3
 @media(max-width:600px){.post-content .note-callout{padding:12px 14px;font-size:14px}}
 
 .post-content blockquote{color:#4b647d;background:none;font-family:inherit;font-size:inherit;font-style:italic;letter-spacing:normal;line-height:1.65;border:0;border-left:2px solid #9bb2ca;border-radius:0;padding:0 0 0 18px;margin:24px 0}
+
+.site-header .wrapper{position:relative}
+.site-header .site-nav{margin-right:46px}
+.site-github{position:absolute;right:24px;top:0;display:inline-flex;align-items:center;justify-content:center;width:36px;height:54px;color:#424242}
+@media(max-width:800px){.site-github{right:9px}}
+@media(max-width:600px){.site-header .site-nav{position:static;background:none;border:0;border-radius:0;margin-right:46px}.site-nav .page-link{display:inline;margin:0;padding:0}}
+.site-github:visited{color:#424242}.site-github:hover{color:#2a7ae2}.site-github svg{display:block}

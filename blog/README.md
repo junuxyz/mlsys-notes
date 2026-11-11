@@ -15,7 +15,9 @@ Open http://127.0.0.1:4321. After editing a source file, run `npm --prefix blog 
 
 ## Published content
 
-The build includes nonempty Markdown files linked from the repository README. Other notes and drafts are excluded from the generated pages and assets. `posts.json` sets optional article URLs, titles, topics, and ordering. An entry with `"unpublished": true` is excluded even if the README links to it.
+The build includes nonempty Markdown articles under `notes/` that are linked from the repository README. Project and lab pages, other notes, and drafts are excluded from the article list and generated article assets. `posts.json` sets optional article URLs, titles, topics, and dates. An entry with `"unpublished": true` is excluded even if the README links to it.
+
+Articles appear newest first on the homepage and in the archive. Dates come from the first Git commit that added each file, following renames. Set `"date": "YYYY-MM-DD"` in a `posts.json` entry to use a specific publication date. The build needs full Git history.
 
 The homepage introduction and About page come from the repository README. `site.json` contains the site title, repository URL, and source branch. Article links, styles, and images use relative URLs so the same build works at `/mlsys-notes/`.
 

@@ -1,5 +1,6 @@
 import { readFile, writeFile, mkdir, rm, cp, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Marked } from 'marked';
@@ -20,7 +21,7 @@ const readme = await readFile(path.join(repo, 'README.md'), 'utf8');
 const readmeBody = readme.replace(/^# [^\n]+\n+/, '');
 const readmeIntro = readmeBody.split(/^## /m)[0].trim();
 const readmeTitleLinks = new Map([...readme.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g)].map(([, title, source]) => [/^[a-z][a-z\d+.-]*:|^\/\//i.test(source) ? source : path.posix.normalize(source), title]));
-const readmeSources = [...readmeTitleLinks.keys()].filter(source => !/^[a-z][a-z\d+.-]*:|^\/\//i.test(source) && source.endsWith('.md'));
+const readmeSources = [...readmeTitleLinks.keys()].filter(source => source.startsWith('notes/') && source.endsWith('.md'));
 const markdownBySource = new Map();
 const configured = new Map(overrides.map(post => [post.source, post]));
 const usedSlugs = new Set();
@@ -38,8 +39,13 @@ for (const source of new Set([...overrides.map(post => post.source), ...readmeSo
   if (usedSlugs.has(slug)) throw new Error(`Duplicate article URL: ${slug}`);
   usedSlugs.add(slug);
   const topic = configured.get(source)?.topic || (path.dirname(source) === 'notes' ? 'Notes' : path.dirname(source).split('/').at(-1));
-  posts.push({ source, slug, title, topic });
+  const date = configured.get(source)?.date || execFileSync('git', ['log', '--follow', '--diff-filter=A', '--format=%aI', '--', source], { cwd: repo, encoding: 'utf8' }).trim().split('\n').at(-1);
+  if (!date || Number.isNaN(Date.parse(date))) throw new Error(`${source}: set a valid date in blog/posts.json or commit the note first`);
+  posts.push({ source, slug, title, topic, date });
 }
+posts.sort((a, b) => Date.parse(b.date) - Date.parse(a.date) || a.slug.localeCompare(b.slug));
+const dateLabel = post => new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(post.date.slice(0, 10)));
+const postDate = post => `<time datetime="${escape(post.date.slice(0, 10))}">${dateLabel(post)}</time>`;
 const readmeRenderer = new Marked();
 const renderReadme = markdown => readmeRenderer.parse(markdown).replace(/href="([^"#]+)"/g, (_, href) => {
   if (/^[a-z][a-z\d+.-]*:|^\/\//i.test(href)) return `href="${href}"`;
@@ -74,7 +80,7 @@ function localURL(value, source, image = false) {
 function shell(title, description, body, active = '') {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"><title>${escape(title === site.title ? site.title : `${title} | ${site.title}`)}</title><meta name="description" content="${escape(description)}"><meta property="og:title" content="${escape(title)}"><meta property="og:description" content="${escape(description)}"><meta property="og:type" content="${active === 'article' ? 'article' : 'website'}"><link rel="stylesheet" href="theme/highlight.css"><link rel="stylesheet" href="theme/katex/katex.min.css"><link rel="stylesheet" href="theme/style.css"></head>
-<body><a class="skip" href="#main">Skip to content</a><header class="site-header" role="banner"><div class="wrapper"><a class="site-title" rel="author" href="index.html">${escape(site.title)}</a><nav class="site-nav" aria-label="Main navigation"><input type="checkbox" id="nav-trigger" class="nav-trigger" aria-label="Toggle navigation"><label for="nav-trigger"><span class="menu-icon"><svg aria-hidden="true" viewBox="0 0 18 15" width="18" height="15"><path d="M0 0h18v3H0zm0 6h18v3H0zm0 6h18v3H0z"/></svg></span></label><div class="trigger"><a class="page-link" href="archive.html">Blog Archive</a><a class="page-link" href="about.html">About</a></div></nav></div></header><main id="main" class="page-content" aria-label="Content"><div class="wrapper">${body}</div></main></body></html>`;
+<body><a class="skip" href="#main">Skip to content</a><header class="site-header" role="banner"><div class="wrapper"><a class="site-title" rel="author" href="index.html">${escape(site.title)}</a><nav class="site-nav" aria-label="Main navigation"><a class="page-link" href="archive.html">Archive</a></nav><a class="site-github" href="${escape(site.repositoryUrl)}" aria-label="View ${escape(site.title)} on GitHub" title="View on GitHub"><svg aria-hidden="true" focusable="false" fill="currentColor" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 16 16"><path d="M6.766 11.328c-2.063-.25-3.516-1.734-3.516-3.656 0-.781.281-1.625.75-2.188-.203-.515-.172-1.609.063-2.062.625-.078 1.468.25 1.968.703.594-.187 1.219-.281 1.985-.281.765 0 1.39.094 1.953.265.484-.437 1.344-.765 1.969-.687.218.422.25 1.515.046 2.047.5.593.766 1.39.766 2.203 0 1.922-1.453 3.375-3.547 3.64.531.344.89 1.094.89 1.954v1.625c0 .468.391.734.86.547C13.781 14.359 16 11.53 16 8.03 16 3.61 12.406 0 7.984 0 3.563 0 0 3.61 0 8.031a7.88 7.88 0 0 0 5.172 7.422c.422.156.828-.125.828-.547v-1.25c-.219.094-.5.156-.75.156-1.031 0-1.64-.562-2.078-1.609-.172-.422-.36-.672-.719-.719-.187-.015-.25-.093-.25-.187 0-.188.313-.328.625-.328.453 0 .844.281 1.25.86.313.452.64.655 1.031.655s.641-.14 1-.5c.266-.265.47-.5.657-.656"/></svg></a></div></header><main id="main" class="page-content" aria-label="Content"><div class="wrapper">${body}</div></main></body></html>`;
 }
 
 for (const post of posts) {
@@ -171,10 +177,10 @@ for (const post of posts) {
   const body = `<article class="post h-entry"><header class="post-header"><h1 class="post-title p-name">${escape(post.title)}</h1></header><div class="post-content e-content">${html}</div><hr><div class="post_navi"><a class="post_navi-item nav_prev" href="${previous.slug}.html"><div class="post_navi-arrow">❮</div><div class="post_navi-label">Previous post</div><div>${escape(previous.title)}</div></a><a class="post_navi-item nav_next" href="${next.slug}.html"><div class="post_navi-arrow">❯</div><div class="post_navi-label">Next post</div><div>${escape(next.title)}</div></a></div></article>`;
   await writeFile(path.join(out, `${post.slug}.html`), shell(post.title, post.title, body, 'article'));
 }
-const topics = [...new Set(posts.map(p => p.topic))];
-const entries = posts.map(p => `<div class="post-item"><div class="post-date">${escape(p.topic)}</div><h3 class="post-title"><a class="post-link" href="${p.slug}.html">${escape(p.title)}</a></h3><div class="post-meta">${p.minutes} min read</div></div>`).join('');
+const entries = posts.map(p => `<div class="post-item"><div class="post-date">${postDate(p)} · ${escape(p.topic)}</div><h3 class="post-title"><a class="post-link" href="${p.slug}.html">${escape(p.title)}</a></h3><div class="post-meta">${p.minutes} min read</div></div>`).join('');
 await writeFile(path.join(out, 'index.html'), shell(site.title, readmeIntro.replace(/\n+/g, ' '), `<div class="home"><div class="profile-container"><div class="profile-content">${introHTML}</div></div><div class="home-sections"><h2 class="post-list-heading">Posts</h2><div class="post-list">${entries}</div></div></div>`));
-await writeFile(path.join(out, 'archive.html'), shell('Blog Archive', 'Articles grouped by topic.', `<article class="post"><header class="post-header"><h1 class="post-title">Blog Archive</h1></header><div class="post-content">${topics.map(topic => `<section><h3>${escape(topic)}</h3><ul>${posts.filter(p => p.topic === topic).map(p => `<li><a href="${p.slug}.html">${escape(p.title)}</a></li>`).join('')}</ul></section>`).join('')}</div></article>`));
+const years = [...new Set(posts.map(post => post.date.slice(0, 4)))];
+await writeFile(path.join(out, 'archive.html'), shell('Archive', 'Articles, newest first.', `<article class="post"><header class="post-header"><h1 class="post-title">Archive</h1></header><div class="post-content">${years.map(year => `<section><h2>${year}</h2><ul>${posts.filter(post => post.date.startsWith(year)).map(post => `<li>${postDate(post)} · <a href="${post.slug}.html">${escape(post.title)}</a></li>`).join('')}</ul></section>`).join('')}</div></article>`));
 await writeFile(path.join(out, 'about.html'), shell('About', readmeIntro.replace(/\n+/g, ' '), `<article class="post"><header class="post-header"><h1 class="post-title">${escape(site.title)}</h1></header><div class="post-content">${aboutHTML}</div></article>`));
 for (const asset of assetCopies) {
   const source = path.join(repo, asset);
