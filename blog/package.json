@@ -8,9 +8,9 @@
     "preview": "node serve.mjs"
   },
   "dependencies": {
-    "highlight.js": "^11.11.1",
     "katex": "^0.18.10",
     "marked": "^17.0.0",
-    "marked-katex-extension": "^5.1.6"
+    "marked-katex-extension": "^5.1.6",
+    "shiki": "^4.6.0"
   }
 }

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { Marked } from 'marked';
 import markedKatex from 'marked-katex-extension';
 import katex from 'katex';
-import hljs from 'highlight.js';
+import { createHighlighter, bundledLanguages, bundledThemes } from 'shiki';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.dirname(root);
@@ -15,6 +15,26 @@ const overrides = JSON.parse(await readFile(path.join(root, 'posts.json'), 'utf8
 const site = JSON.parse(await readFile(path.join(root, 'site.json'), 'utf8'));
 const posts = [];
 const escape = text => String(text).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+// Code highlighting: Shiki (VS Code TextMate grammars) with the github-light theme, rendered at build time.
+// github-light leaves Python calls like x.view(...) uncolored (the grammar tags them
+// meta.function-call.generic, which the theme skips), so color them GitHub's function purple.
+const CODE_THEME = 'github-light-calls';
+const baseTheme = (await bundledThemes['github-light']()).default;
+const codeTheme = { ...baseTheme, name: CODE_THEME, tokenColors: [...baseTheme.tokenColors, { scope: ['meta.function-call.generic'], settings: { foreground: '#6F42C1' } }] };
+const CODE_LANGS = ['python', 'bash', 'sh', 'zsh', 'fish', 'console', 'c', 'cpp', 'cuda', 'json', 'yaml', 'toml', 'ssh-config', 'diff', 'rust', 'go', 'javascript', 'typescript'].filter(l => l in bundledLanguages);
+const shiki = await createHighlighter({ themes: [codeTheme], langs: CODE_LANGS });
+const LANG_ALIAS = { sshconfig: 'ssh-config' };
+function highlightCode(text, lang) {
+  const language = LANG_ALIAS[lang] || lang;
+  if (!shiki.getLoadedLanguages().includes(language)) return text.split('\n').map(escape);
+  return shiki.codeToTokens(text, { lang: language, theme: CODE_THEME }).tokens.map(line => line.map(t => {
+    const style = [`color:${t.color}`];
+    if (t.fontStyle & 1) style.push('font-style:italic');
+    if (t.fontStyle & 2) style.push('font-weight:600');
+    return `<span style="${style.join(';')}">${escape(t.content)}</span>`;
+  }).join(''));
+}
 const github = site.repositoryUrl;
 const sourceURL = `${github}/blob/${site.sourceBranch}`;
 const readme = await readFile(path.join(repo, 'README.md'), 'utf8');
@@ -60,7 +80,6 @@ await mkdir(path.join(out, 'assets'), { recursive: true });
 await cp(path.join(root, 'theme'), path.join(out, 'theme'), { recursive: true });
 await cp(path.join(root, 'THIRD_PARTY_NOTICES.md'), path.join(out, 'THIRD_PARTY_NOTICES.md'));
 await cp(path.join(root, 'node_modules/katex/dist'), path.join(out, 'theme/katex'), { recursive: true });
-await cp(path.join(root, 'node_modules/highlight.js/styles/github.css'), path.join(out, 'theme/highlight.css'));
 const assetCopies = new Set();
 const missing = new Set();
 function localURL(value, source, image = false) {
@@ -77,10 +96,20 @@ function localURL(value, source, image = false) {
   }
   return `${sourceURL}/${relative.split('/').map(encodeURIComponent).join('/')}${suffix}`;
 }
-function shell(title, description, body, active = '') {
+const COPY_ICON = '<svg class="icon-copy" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/><path fill="currentColor" d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>';
+const CHECK_ICON = '<svg class="icon-check" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg>';
+const copyScript = `<script>document.addEventListener('click', async e => {
+  const btn = e.target.closest('.code-copy'); if (!btn) return;
+  const text = btn.closest('.code-window').querySelector('pre:not(.code-gutter) code').innerText;
+  try { await navigator.clipboard.writeText(text); }
+  catch { const t = document.createElement('textarea'); t.value = text; t.style.position = 'fixed'; t.style.opacity = '0'; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
+  btn.classList.add('copied'); btn.setAttribute('aria-label', 'Copied');
+  clearTimeout(btn._t); btn._t = setTimeout(() => { btn.classList.remove('copied'); btn.setAttribute('aria-label', 'Copy code'); }, 1500);
+});</script>`;
+function shell(title, description, body, active = '', extra = '') {
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"><title>${escape(title === site.title ? site.title : `${title} | ${site.title}`)}</title><meta name="description" content="${escape(description)}"><meta property="og:title" content="${escape(title)}"><meta property="og:description" content="${escape(description)}"><meta property="og:type" content="${active === 'article' ? 'article' : 'website'}"><link rel="stylesheet" href="theme/highlight.css"><link rel="stylesheet" href="theme/katex/katex.min.css"><link rel="stylesheet" href="theme/style.css"></head>
-<body><a class="skip" href="#main">Skip to content</a><header class="site-header" role="banner"><div class="wrapper"><a class="site-title" rel="author" href="index.html">${escape(site.title)}</a><nav class="site-nav" aria-label="Main navigation"><a class="page-link" href="archive.html">Archive</a></nav><a class="site-github" href="${escape(site.repositoryUrl)}" aria-label="View ${escape(site.title)} on GitHub" title="View on GitHub"><svg aria-hidden="true" focusable="false" fill="currentColor" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 16 16"><path d="M6.766 11.328c-2.063-.25-3.516-1.734-3.516-3.656 0-.781.281-1.625.75-2.188-.203-.515-.172-1.609.063-2.062.625-.078 1.468.25 1.968.703.594-.187 1.219-.281 1.985-.281.765 0 1.39.094 1.953.265.484-.437 1.344-.765 1.969-.687.218.422.25 1.515.046 2.047.5.593.766 1.39.766 2.203 0 1.922-1.453 3.375-3.547 3.64.531.344.89 1.094.89 1.954v1.625c0 .468.391.734.86.547C13.781 14.359 16 11.53 16 8.03 16 3.61 12.406 0 7.984 0 3.563 0 0 3.61 0 8.031a7.88 7.88 0 0 0 5.172 7.422c.422.156.828-.125.828-.547v-1.25c-.219.094-.5.156-.75.156-1.031 0-1.64-.562-2.078-1.609-.172-.422-.36-.672-.719-.719-.187-.015-.25-.093-.25-.187 0-.188.313-.328.625-.328.453 0 .844.281 1.25.86.313.452.64.655 1.031.655s.641-.14 1-.5c.266-.265.47-.5.657-.656"/></svg></a></div></header><main id="main" class="page-content" aria-label="Content"><div class="wrapper">${body}</div></main></body></html>`;
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"><title>${escape(title === site.title ? site.title : `${title} | ${site.title}`)}</title><meta name="description" content="${escape(description)}"><meta property="og:title" content="${escape(title)}"><meta property="og:description" content="${escape(description)}"><meta property="og:type" content="${active === 'article' ? 'article' : 'website'}"><link rel="stylesheet" href="theme/katex/katex.min.css"><link rel="stylesheet" href="theme/style.css"></head>
+<body><a class="skip" href="#main">Skip to content</a><header class="site-header" role="banner"><div class="wrapper"><a class="site-title" rel="author" href="index.html">${escape(site.title)}</a><nav class="site-nav" aria-label="Main navigation"><a class="page-link" href="archive.html">Archive</a></nav><a class="site-github" href="${escape(site.repositoryUrl)}" aria-label="View ${escape(site.title)} on GitHub" title="View on GitHub"><svg aria-hidden="true" focusable="false" fill="currentColor" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 16 16"><path d="M6.766 11.328c-2.063-.25-3.516-1.734-3.516-3.656 0-.781.281-1.625.75-2.188-.203-.515-.172-1.609.063-2.062.625-.078 1.468.25 1.968.703.594-.187 1.219-.281 1.985-.281.765 0 1.39.094 1.953.265.484-.437 1.344-.765 1.969-.687.218.422.25 1.515.046 2.047.5.593.766 1.39.766 2.203 0 1.922-1.453 3.375-3.547 3.64.531.344.89 1.094.89 1.954v1.625c0 .468.391.734.86.547C13.781 14.359 16 11.53 16 8.03 16 3.61 12.406 0 7.984 0 3.563 0 0 3.61 0 8.031a7.88 7.88 0 0 0 5.172 7.422c.422.156.828-.125.828-.547v-1.25c-.219.094-.5.156-.75.156-1.031 0-1.64-.562-2.078-1.609-.172-.422-.36-.672-.719-.719-.187-.015-.25-.093-.25-.187 0-.188.313-.328.625-.328.453 0 .844.281 1.25.86.313.452.64.655 1.031.655s.641-.14 1-.5c.266-.265.47-.5.657-.656"/></svg></a></div></header><main id="main" class="page-content" aria-label="Content"><div class="wrapper">${body}</div></main>${extra}</body></html>`;
 }
 
 for (const post of posts) {
@@ -137,12 +166,21 @@ for (const post of posts) {
     code({ text, lang }) {
       if (lang === 'math') return `<div class="math-block">${katex.renderToString(text, { displayMode: true, throwOnError: false })}</div>`;
       const language = (lang || '').split(/\s/)[0];
-      const highlighted = hljs.getLanguage(language) ? hljs.highlight(text, { language }).value : escape(text);
-      return `<pre><code class="hljs language-${escape(language)}">${highlighted}</code></pre>`;
+      const lines = highlightCode(text.replace(/\n$/, ''), language);
+      const highlighted = lines.join('\n');
+      const gutter = Array.from({ length: lines.length }, (_, i) => i + 1).join('\n');
+      const bar = `<div class="code-bar"><span class="code-dots" aria-hidden="true"><span class="code-dot"></span><span class="code-dot"></span><span class="code-dot"></span></span><!--code-src--><button class="code-copy" type="button" aria-label="Copy code" title="Copy code">${COPY_ICON}${CHECK_ICON}</button></div>`;
+      return `<div class="code-window">${bar}<div class="code-body"><pre class="code-gutter" aria-hidden="true">${gutter}</pre><pre><code class="language-${escape(language)}">${highlighted}</code></pre></div></div>`;
     }
   }});
   let html = marked.parse(markdown);
   html = html.replace(/\b(src|href)="([^"]+)"/g, (_, attr, url) => `${attr}="${escape(localURL(url.replace(/&amp;/g, '&'), post.source, attr === 'src'))}"`);
+  // "Source: ..." paragraphs move into the title bar of the code block they cite.
+  // A Source line right before a code block belongs to it (vLLM notes); otherwise one right after it (DFlash note).
+  const srcSpan = src => `<span class="code-source">${src.trim().replace(/\.$/, '')}</span>`;
+  html = html.replace(/<p>Source:\s*((?:(?!<\/p>)[\s\S])*)<\/p>\s*(<div class="code-window">(?:(?!<!--code-src-->)[\s\S])*)<!--code-src-->/g, (_, src, win) => win + srcSpan(src));
+  html = html.replace(/(<div class="code-window">(?:(?!<div class="code-window">)[\s\S])*?)<!--code-src-->((?:(?!<div class="code-window">)[\s\S])*?<\/code><\/pre><\/div><\/div>)\s*<p>Source:\s*((?:(?!<\/p>)[\s\S])*)<\/p>/g, (_, head, tail, src) => head + srcSpan(src) + tail);
+  html = html.replaceAll('<!--code-src-->', '');
   html = html.replace(/<img\b[^>]*>/g, tag => {
     const src = tag.match(/\bsrc="([^"]+)"/)?.[1];
     if (!src?.startsWith('assets/')) return tag;
@@ -175,7 +213,7 @@ for (const post of posts) {
   html = firstHeading >= 0 ? html.slice(0, firstHeading) + toc + html.slice(firstHeading) : html;
   const previous = posts[(posts.indexOf(post) + posts.length - 1) % posts.length];
   const body = `<article class="post h-entry"><header class="post-header"><h1 class="post-title p-name">${escape(post.title)}</h1></header><div class="post-content e-content">${html}</div><hr><div class="post_navi"><a class="post_navi-item nav_prev" href="${previous.slug}.html"><div class="post_navi-arrow">❮</div><div class="post_navi-label">Previous post</div><div>${escape(previous.title)}</div></a><a class="post_navi-item nav_next" href="${next.slug}.html"><div class="post_navi-arrow">❯</div><div class="post_navi-label">Next post</div><div>${escape(next.title)}</div></a></div></article>`;
-  await writeFile(path.join(out, `${post.slug}.html`), shell(post.title, post.title, body, 'article'));
+  await writeFile(path.join(out, `${post.slug}.html`), shell(post.title, post.title, body, 'article', html.includes('code-window') ? copyScript : ''));
 }
 const entries = posts.map(p => `<div class="post-item"><div class="post-date">${postDate(p)}</div><h3 class="post-title"><a class="post-link" href="${p.slug}.html">${escape(p.title)}</a></h3><div class="post-meta">${p.minutes} min read</div></div>`).join('');
 await writeFile(path.join(out, 'index.html'), shell(site.title, readmeIntro.replace(/\n+/g, ' '), `<div class="home"><div class="profile-container"><div class="profile-content">${introHTML}</div></div><div class="home-sections"><h2 class="post-list-heading">Posts</h2><div class="post-list">${entries}</div></div></div>`));
