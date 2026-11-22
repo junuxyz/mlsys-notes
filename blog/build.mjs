@@ -199,16 +199,13 @@ for (const post of posts) {
   });
   html = html.replace(/<a\b([^>]*?)href="(\.\.\/[^"#]+)"([^>]*)>/g, (_, before, href, after) => `<a${before}aria-disabled="true" title="Linked file is outside this repository"${after}>`);
   const next = posts[(posts.indexOf(post) + 1) % posts.length];
-  const tocTree = [];
-  const tocStack = [{ depth: 0, children: tocTree }];
-  for (const heading of headings) {
-    while (tocStack.length > 1 && tocStack.at(-1).depth >= heading.depth) tocStack.pop();
-    const node = { ...heading, children: [] };
-    tocStack.at(-1).children.push(node);
-    tocStack.push(node);
-  }
-  const tocList = nodes => `<ul>${nodes.map(h => `<li><a href="#${h.id}">${escape(h.text)}</a>${h.children.length ? tocList(h.children) : ''}</li>`).join('')}</ul>`;
-  const toc = `<h2 id="table-of-contents">Table of contents</h2>${tocList(tocTree)}`;
+  const tocDepths = [];
+  const tocItems = headings.map(({ depth, id, text }) => {
+    while (tocDepths.at(-1) >= depth) tocDepths.pop();
+    tocDepths.push(depth);
+    return `<li class="toc-level-${tocDepths.length}"><a href="#${id}">${escape(text)}</a></li>`;
+  });
+  const toc = `<h2 id="table-of-contents">Table of contents</h2><ul class="post-toc">${tocItems.join('')}</ul>`;
   const firstHeading = html.search(/<h[1-6] /);
   html = firstHeading >= 0 ? html.slice(0, firstHeading) + toc + html.slice(firstHeading) : html;
   const previous = posts[(posts.indexOf(post) + posts.length - 1) % posts.length];
