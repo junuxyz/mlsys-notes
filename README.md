@@ -5,6 +5,7 @@ Learning notes and experiments on modern machine learning systems.
 Currently focusing on LLM serving and inference optimization.
 
 ## Notes
+- [Inside DFlash](notes/inside-dflash.md)
 - [Introduction to LLM Inference Part 1](notes/llm-inference-intro-p1.md)
 - [ORCA paper review](notes/orca.md)
 - [PagedAttention paper review](notes/pagedattention.md)

@@ -1,5 +1,12 @@
 [
   {
+    "slug": "inside-dflash",
+    "source": "notes/inside-dflash.md",
+    "title": "Inside DFlash",
+    "topic": "Inference",
+    "date": "2026-11-23"
+  },
+  {
     "slug": "llm-inference",
     "source": "notes/llm-inference-intro-p1.md",
     "title": "Introduction to LLM Inference Part 1",
